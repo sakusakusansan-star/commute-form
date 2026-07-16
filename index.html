@@ -110,6 +110,7 @@
 
 <div id="staff-select-screen" class="hidden">
   <div class="ss-title">あなたは誰ですか？</div>
+  <div id="ss-msg" style="display:none;color:#FFD37A;font-size:13px;text-align:center;margin:-8px 0 14px;line-height:1.5;"></div>
   <div id="ss-buttons"></div>
 </div>
 
@@ -307,16 +308,59 @@
     if (currentStaff) { startApp(); } else { showStaffSelect(); }
   };
 
-  function showStaffSelect() {
+  // ---- スタッフ名の名寄せ（表記ゆれ吸収） ----
+  function normName(s) {
+    return String(s == null ? '' : s).replace(/[\s\u3000]+/g, '').trim();
+  }
+  function matchStaff(want, list) {
+    var w = normName(want);
+    if (!w || !list || !list.length) return null;
+    var hit = null;
+    list.forEach(function(n) { if (!hit && normName(n) === w) hit = n; });
+    if (hit) return hit;
+    var partial = list.filter(function(n) {
+      var t = normName(n);
+      return t.indexOf(w) === 0 || w.indexOf(t) === 0;
+    });
+    return partial.length === 1 ? partial[0] : null;
+  }
+
+  // 名前が一致しなかったときに一覧から選び直してもらう
+  function resolveStaffAndRetry(want) {
+    callApi('getStaffList').then(function(list) {
+      var hit = matchStaff(want, list);
+      if (hit) {
+        currentStaff = hit;
+        localStorage.setItem(STAFF_KEY, hit);
+        startApp();
+      } else {
+        localStorage.removeItem(STAFF_KEY);
+        showStaffSelect(list, '「' + want + '」は登録されていません。下から選んでください。');
+      }
+    }).catch(function(err) {
+      document.getElementById('topbar-month').textContent = '読み込みエラー';
+      alert('読み込みエラー: ' + err.message);
+    });
+  }
+
+  function showStaffSelect(preList, msg) {
     document.getElementById('staff-select-screen').classList.remove('hidden');
     document.getElementById('main-app').style.display = 'none';
-    callApi('getStaffList').then(function(list) {
+    var msgEl = document.getElementById('ss-msg');
+    if (msg) { msgEl.textContent = msg; msgEl.style.display = 'block'; }
+    else { msgEl.style.display = 'none'; }
+
+    var render = function(list) {
       var html = '';
       list.forEach(function(name) {
         html += '<button class="ss-btn" onclick="selectStaff(\'' + name + '\')">' + name + '</button>';
       });
       document.getElementById('ss-buttons').innerHTML = html;
-    }).catch(function(err) {
+    };
+
+    if (preList && preList.length) { render(preList); return; }
+
+    callApi('getStaffList').then(render).catch(function(err) {
       document.getElementById('ss-buttons').innerHTML = '<p style="color:#fff;text-align:center;">読み込みエラー: ' + err.message + '</p>';
     });
   }
@@ -324,6 +368,13 @@
   function selectStaff(name) {
     localStorage.setItem(STAFF_KEY, name);
     currentStaff = name;
+    try {
+      var u = new URL(window.location.href);
+      if (u.searchParams.has('staff')) {
+        u.searchParams.delete('staff');
+        history.replaceState(null, '', u.toString());
+      }
+    } catch (e) {}
     document.getElementById('staff-select-screen').classList.add('hidden');
     startApp();
   }
@@ -355,6 +406,11 @@
       renderCalIrreg();
       renderQuickPlaces();
     }).catch(function(err) {
+      // 名前の表記ゆれ・未登録は一覧を取り直して自動リカバリ
+      if (/不明なスタッフ|スタッフが見つかり/.test(err.message)) {
+        resolveStaffAndRetry(currentStaff);
+        return;
+      }
       document.getElementById('topbar-month').textContent = '読み込みエラー';
       alert('読み込みエラー: ' + err.message);
     });
