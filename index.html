@@ -295,20 +295,46 @@
     });
   }
 
+  // ---- 苗字 → フルネームの即時変換テーブル ----
+  // GAS側 STAFF_HOME のキー（フルネーム）と揃えること
+  var STAFF_ALIASES = {
+    '福山': '福山康平',
+    '古川': '古川泰成',
+    '清田': '清田和男'
+  };
+
+  // 通信を待たずにその場で正式名へ変換（表記ゆれ・空白は無視）
+  function resolveAlias(name) {
+    var n = normName(name);
+    for (var k in STAFF_ALIASES) {
+      if (normName(k) === n) return STAFF_ALIASES[k];
+    }
+    // すでにフルネームで渡ってきた場合はそのまま
+    for (var key in STAFF_ALIASES) {
+      if (normName(STAFF_ALIASES[key]) === n) return STAFF_ALIASES[key];
+    }
+    return name;
+  }
+
   window.onload = function() {
     var params = new URLSearchParams(window.location.search);
     var staffFromUrl = params.get('staff');
     if (staffFromUrl) {
-      currentStaff = staffFromUrl;
-      localStorage.setItem(STAFF_KEY, staffFromUrl);
+      currentStaff = resolveAlias(staffFromUrl);
+      localStorage.setItem(STAFF_KEY, currentStaff);
       startApp();
       return;
     }
     currentStaff = localStorage.getItem(STAFF_KEY);
-    if (currentStaff) { startApp(); } else { showStaffSelect(); }
+    if (currentStaff) {
+      currentStaff = resolveAlias(currentStaff);
+      startApp();
+    } else {
+      showStaffSelect();
+    }
   };
 
-  // ---- スタッフ名の名寄せ（表記ゆれ吸収） ----
+  // ---- スタッフ名の名寄せ（表記ゆれ吸収／未知の名前用フォールバック） ----
   function normName(s) {
     return String(s == null ? '' : s).replace(/[\s\u3000]+/g, '').trim();
   }
