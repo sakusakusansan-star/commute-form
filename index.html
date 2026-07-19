@@ -60,6 +60,8 @@
   .quick-places { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
   .qp-btn { padding: 13px 4px; border: 2px solid #DDE4EA; border-radius: 10px; background: #FAFBFC; font-size: 13px; font-weight: 700; color: #4A5865; }
   .qp-btn.selected { border-color: #2D5F8A; background: #EEF2F7; color: #1B2A4A; }
+  .qp-btn.pinned { border-color: #C8A951; }
+  .qp-btn.pinned.selected { border-color: #2D5F8A; background: #EEF2F7; }
 
   .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .cal-nav { background: #F2F6F9; border: none; border-radius: 10px; width: 44px; height: 40px; font-size: 16px; color: #2D5F8A; font-weight: 700; }
@@ -267,6 +269,12 @@
   var selectedHighway = '無';
   var currentType = 'normal';
 
+  // ▼▼▼ 固定でよく使う稼働場所（常にクイックボタン先頭に表示） ▼▼▼
+  //   ここに名前を書けば固定表示。マスタ（稼働場所シート）に存在する名前だけ有効。
+  var PINNED_PLACES = ['ドコモ近見', 'au・SB下通', 'イオン宇城'];
+  // クイックボタンに出す最大件数（固定＋頻度順の合計）
+  var QUICK_PLACES_MAX = 8;
+
   var calYear, calMonth, startDay = null, endDay = null;
   var calYearIrreg, calMonthIrreg, dayIrreg = null;
 
@@ -459,24 +467,34 @@
   }
 
   // ===== 稼働場所 =====
+  // 固定（PINNED_PLACES）を先頭に、残りは placeList の並び順（＝GASが使用頻度順で返す）で表示。
+  // クイックボタンは合計 QUICK_PLACES_MAX 件まで。あふれた分は「その他の場所を選ぶ…」に入れる。
   function renderQuickPlaces() {
     var wrap = document.getElementById('quick-places');
     var select = document.getElementById('place-select');
     wrap.innerHTML = '';
     select.innerHTML = '<option value="">その他の場所を選ぶ…</option>';
 
-    var quick = placeList.slice(0, 4);
-    var rest = placeList.slice(4);
+    // マスタに存在する固定場所だけ採用
+    var pinned = PINNED_PLACES.filter(function(p) { return placeList.indexOf(p) !== -1; });
+
+    // 固定を除いた残り（＝頻度順のまま）
+    var rest = placeList.filter(function(p) { return pinned.indexOf(p) === -1; });
+
+    // クイックに出す件数：固定 ＋ 頻度順の上位
+    var extraCount = Math.max(0, QUICK_PLACES_MAX - pinned.length);
+    var quick = pinned.concat(rest.slice(0, extraCount));
+    var dropdownRest = rest.slice(extraCount);
 
     quick.forEach(function(p) {
       var b = document.createElement('button');
-      b.className = 'qp-btn';
+      b.className = 'qp-btn' + (pinned.indexOf(p) !== -1 ? ' pinned' : '');
       b.textContent = p;
       b.onclick = function() { selectPlace(p, b); };
       wrap.appendChild(b);
     });
 
-    rest.forEach(function(p) {
+    dropdownRest.forEach(function(p) {
       var opt = document.createElement('option');
       opt.value = p; opt.textContent = p;
       select.appendChild(opt);
