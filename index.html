@@ -113,6 +113,7 @@
   .btn-save-place { background: #2D5F8A; color: #fff; }
   .btn-del-place { background: #FEE2E2; color: #DC2626; }
   .place-add-box { margin-top: 14px; padding-top: 14px; border-top: 1px solid #E5E9EE; }
+  .place-list-toggle { margin-top: 16px; padding: 12px 4px; text-align: center; font-size: 13px; font-weight: 700; color: #2D5F8A; border-top: 1px solid #E5E9EE; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -265,14 +266,17 @@
     <div class="card">
       <div class="card-label">📍 稼働場所の管理</div>
       <p style="font-size:13px;color:#6B7280;margin-bottom:12px;">稼働場所の追加・編集・削除ができます（自宅の設定はここには表示されません）。</p>
-      <div id="place-manage-list"><div class="empty-msg">読み込み中...</div></div>
-      <div class="place-add-box">
+      <div class="place-add-box place-add-box-top">
         <label class="field-label">新しい場所を追加</label>
         <input type="text" id="new-place-name" placeholder="名称（例: 手取本町店）" style="margin-bottom:8px;">
         <input type="text" id="new-place-address" placeholder="住所">
         <button class="btn-submit" style="margin-top:10px;" onclick="addPlace()">＋ 追加する</button>
         <div id="place-add-result" style="margin-top:8px;font-size:13px;text-align:center;"></div>
       </div>
+      <div class="place-list-toggle" onclick="togglePlaceList()">
+        <span id="place-list-toggle-label">既存の場所を見る ▾</span>
+      </div>
+      <div id="place-manage-list" style="display:none;"><div class="empty-msg">読み込み中...</div></div>
     </div>
   </div>
 
@@ -470,7 +474,6 @@
       document.getElementById('page-'+t).classList.toggle('active', t===tab);
     });
     if (tab === 'confirm') loadEntries();
-    if (tab === 'settings') loadPlaceManage();
   }
 
   function switchType(type) {
@@ -811,6 +814,22 @@
       placeList = list;
       renderQuickPlaces();
     });
+  }
+
+  var placeListExpanded = false;
+
+  function togglePlaceList() {
+    placeListExpanded = !placeListExpanded;
+    var el = document.getElementById('place-manage-list');
+    var label = document.getElementById('place-list-toggle-label');
+    if (placeListExpanded) {
+      el.style.display = 'block';
+      label.textContent = '既存の場所を閉じる ▴';
+      loadPlaceManage();
+    } else {
+      el.style.display = 'none';
+      label.textContent = '既存の場所を見る ▾';
+    }
   }
 
   function loadPlaceManage() {
