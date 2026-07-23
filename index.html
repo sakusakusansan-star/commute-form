@@ -60,8 +60,6 @@
   .quick-places { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
   .qp-btn { padding: 13px 4px; border: 2px solid #DDE4EA; border-radius: 10px; background: #FAFBFC; font-size: 13px; font-weight: 700; color: #4A5865; }
   .qp-btn.selected { border-color: #2D5F8A; background: #EEF2F7; color: #1B2A4A; }
-  .qp-btn.pinned { border-color: #C8A951; }
-  .qp-btn.pinned.selected { border-color: #2D5F8A; background: #EEF2F7; }
 
   .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .cal-nav { background: #F2F6F9; border: none; border-radius: 10px; width: 44px; height: 40px; font-size: 16px; color: #2D5F8A; font-weight: 700; }
@@ -106,6 +104,15 @@
   .empty-msg { text-align: center; color: #9CA3AF; font-size: 14px; padding: 30px 0; }
 
   .btn-pdf { width: 100%; padding: 16px; background: linear-gradient(135deg, #2D5F8A, #1B2A4A); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: bold; margin-top: 4px; }
+
+  .place-item { background: #F9FAFB; border-radius: 10px; padding: 12px; margin-bottom: 8px; }
+  .place-item input { margin-bottom: 8px; }
+  .place-item input:last-of-type { margin-bottom: 10px; }
+  .place-item-actions { display: flex; gap: 8px; }
+  .place-item-actions button { flex: 1; padding: 10px; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; }
+  .btn-save-place { background: #2D5F8A; color: #fff; }
+  .btn-del-place { background: #FEE2E2; color: #DC2626; }
+  .place-add-box { margin-top: 14px; padding-top: 14px; border-top: 1px solid #E5E9EE; }
 </style>
 </head>
 <body>
@@ -254,6 +261,19 @@
       <button class="btn-pdf" onclick="exportPdf()">📄 PDFをGoogle Driveへ保存</button>
       <div id="pdf-result" style="margin-top:10px;font-size:13px;text-align:center;"></div>
     </div>
+
+    <div class="card">
+      <div class="card-label">📍 稼働場所の管理</div>
+      <p style="font-size:13px;color:#6B7280;margin-bottom:12px;">稼働場所の追加・編集・削除ができます（自宅の設定はここには表示されません）。</p>
+      <div id="place-manage-list"><div class="empty-msg">読み込み中...</div></div>
+      <div class="place-add-box">
+        <label class="field-label">新しい場所を追加</label>
+        <input type="text" id="new-place-name" placeholder="名称（例: 手取本町店）" style="margin-bottom:8px;">
+        <input type="text" id="new-place-address" placeholder="住所">
+        <button class="btn-submit" style="margin-top:10px;" onclick="addPlace()">＋ 追加する</button>
+        <div id="place-add-result" style="margin-top:8px;font-size:13px;text-align:center;"></div>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -268,12 +288,6 @@
   var selectedPlace = null;
   var selectedHighway = '無';
   var currentType = 'normal';
-
-  // ▼▼▼ 固定でよく使う稼働場所（常にクイックボタン先頭に表示） ▼▼▼
-  //   ここに名前を書けば固定表示。マスタ（稼働場所シート）に存在する名前だけ有効。
-  var PINNED_PLACES = ['ドコモ近見', 'au・SB下通', 'イオン宇城'];
-  // クイックボタンに出す最大件数（固定＋頻度順の合計）
-  var QUICK_PLACES_MAX = 8;
 
   var calYear, calMonth, startDay = null, endDay = null;
   var calYearIrreg, calMonthIrreg, dayIrreg = null;
@@ -456,6 +470,7 @@
       document.getElementById('page-'+t).classList.toggle('active', t===tab);
     });
     if (tab === 'confirm') loadEntries();
+    if (tab === 'settings') loadPlaceManage();
   }
 
   function switchType(type) {
@@ -467,34 +482,24 @@
   }
 
   // ===== 稼働場所 =====
-  // 固定（PINNED_PLACES）を先頭に、残りは placeList の並び順（＝GASが使用頻度順で返す）で表示。
-  // クイックボタンは合計 QUICK_PLACES_MAX 件まで。あふれた分は「その他の場所を選ぶ…」に入れる。
   function renderQuickPlaces() {
     var wrap = document.getElementById('quick-places');
     var select = document.getElementById('place-select');
     wrap.innerHTML = '';
     select.innerHTML = '<option value="">その他の場所を選ぶ…</option>';
 
-    // マスタに存在する固定場所だけ採用
-    var pinned = PINNED_PLACES.filter(function(p) { return placeList.indexOf(p) !== -1; });
-
-    // 固定を除いた残り（＝頻度順のまま）
-    var rest = placeList.filter(function(p) { return pinned.indexOf(p) === -1; });
-
-    // クイックに出す件数：固定 ＋ 頻度順の上位
-    var extraCount = Math.max(0, QUICK_PLACES_MAX - pinned.length);
-    var quick = pinned.concat(rest.slice(0, extraCount));
-    var dropdownRest = rest.slice(extraCount);
+    var quick = placeList.slice(0, 4);
+    var rest = placeList.slice(4);
 
     quick.forEach(function(p) {
       var b = document.createElement('button');
-      b.className = 'qp-btn' + (pinned.indexOf(p) !== -1 ? ' pinned' : '');
+      b.className = 'qp-btn';
       b.textContent = p;
       b.onclick = function() { selectPlace(p, b); };
       wrap.appendChild(b);
     });
 
-    dropdownRest.forEach(function(p) {
+    rest.forEach(function(p) {
       var opt = document.createElement('option');
       opt.value = p; opt.textContent = p;
       select.appendChild(opt);
@@ -790,6 +795,101 @@
     }).catch(function(err) {
       el.style.color = '#DC2626';
       el.textContent = '❌ ' + err.message;
+    });
+  }
+
+  // ===== 稼働場所の管理 =====
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function refreshPlaceListForForm() {
+    // 場所マスタが変わったら入力タブのクイック選択も更新
+    callApi('getPlaceList').then(function(list) {
+      placeList = list;
+      renderQuickPlaces();
+    });
+  }
+
+  function loadPlaceManage() {
+    var el = document.getElementById('place-manage-list');
+    el.innerHTML = '<div class="empty-msg">読み込み中...</div>';
+    callApi('getPlaceListManage').then(function(list) {
+      if (!list || !list.length) {
+        el.innerHTML = '<div class="empty-msg">登録された場所がありません</div>';
+        return;
+      }
+      var html = '';
+      list.forEach(function(p) {
+        html += '<div class="place-item" data-row="' + p.row + '">'
+          + '<input type="text" class="place-name-input" value="' + escapeHtml(p.name) + '">'
+          + '<input type="text" class="place-address-input" value="' + escapeHtml(p.address) + '">'
+          + '<div class="place-item-actions">'
+          + '<button class="btn-save-place" onclick="savePlace(this)">保存</button>'
+          + '<button class="btn-del-place" onclick="deletePlaceItem(this)">削除</button>'
+          + '</div></div>';
+      });
+      el.innerHTML = html;
+    }).catch(function(err) {
+      el.innerHTML = '<div class="empty-msg">読み込みエラー: ' + err.message + '</div>';
+    });
+  }
+
+  function savePlace(btn) {
+    var item = btn.closest('.place-item');
+    var row = item.getAttribute('data-row');
+    var name = item.querySelector('.place-name-input').value.trim();
+    var address = item.querySelector('.place-address-input').value.trim();
+    if (!name || !address) { alert('名称と住所を入力してください'); return; }
+
+    btn.disabled = true; btn.textContent = '保存中...';
+    callApi('updatePlace', { row: row, name: name, address: address }).then(function() {
+      loadPlaceManage();
+      refreshPlaceListForForm();
+    }).catch(function(err) {
+      alert('保存エラー: ' + err.message);
+      btn.disabled = false; btn.textContent = '保存';
+    });
+  }
+
+  function deletePlaceItem(btn) {
+    var item = btn.closest('.place-item');
+    var row = item.getAttribute('data-row');
+    var name = item.querySelector('.place-name-input').value.trim();
+    if (!confirm('「' + name + '」を削除しますか？\n（すでに使われている実績データはそのまま残ります）')) return;
+
+    btn.disabled = true; btn.textContent = '削除中...';
+    callApi('deletePlace', { row: row }).then(function() {
+      loadPlaceManage();
+      refreshPlaceListForForm();
+    }).catch(function(err) {
+      alert('削除エラー: ' + err.message);
+      btn.disabled = false; btn.textContent = '削除';
+    });
+  }
+
+  function addPlace() {
+    var nameEl = document.getElementById('new-place-name');
+    var addrEl = document.getElementById('new-place-address');
+    var resultEl = document.getElementById('place-add-result');
+    var name = nameEl.value.trim();
+    var address = addrEl.value.trim();
+
+    if (!name) { resultEl.className = 'error-msg'; resultEl.textContent = '⚠️ 名称を入力してください'; return; }
+    if (!address) { resultEl.className = 'error-msg'; resultEl.textContent = '⚠️ 住所を入力してください'; return; }
+
+    resultEl.className = ''; resultEl.textContent = '追加中...';
+    callApi('addPlace', { name: name, address: address }).then(function() {
+      resultEl.className = 'success';
+      resultEl.textContent = '✅ 追加しました';
+      nameEl.value = ''; addrEl.value = '';
+      loadPlaceManage();
+      refreshPlaceListForForm();
+    }).catch(function(err) {
+      resultEl.className = 'error-msg';
+      resultEl.textContent = '⚠️ ' + err.message;
     });
   }
 </script>
