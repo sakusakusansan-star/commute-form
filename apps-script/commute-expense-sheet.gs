@@ -88,6 +88,8 @@ function onOpen() {
     .addSeparator()
     .addItem('⚙️ 初期設定（初回のみ）', 'initialSetup')
     .addItem('🔌 自動計算トリガーを再設定', 'installEditTriggerFromMenu')
+    .addSeparator()
+    .addItem('🩺 Drive権限をチェック', 'checkDriveAccess')
     .addItem('🩺 PDF保存をテスト', 'testExportPdf')
     .addToUi();
 }
@@ -135,22 +137,52 @@ function installEditTrigger() {
     .create();
 }
 
-// スプレッドシートのメニューからPDF保存だけを試す診断用。
-// Webフォーム経由だとHTMLエラーに埋もれて原因が見えないため、
-// 権限やフォルダIDの問題をGAS側だけで切り分けられるようにしている。
-function testExportPdf() {
-  const ui = SpreadsheetApp.getUi();
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  const name = sheet.getName();
-  if (!CONFIG.STAFF_HOME[name]) {
-    ui.alert('スタッフシートを選択してから実行してください。');
-    return;
+// メッセージをUIに出す。エディタから実行した時はUIが無く getUi() が例外を投げるので、
+// その場合はログだけに残す。診断用の関数をメニューからでもエディタからでも
+// 同じように実行できるようにするための小道具。
+function report_(msg) {
+  Logger.log(msg);
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (e) {
+    // エディタ実行時はUIが使えないのでログのみ。ここで失敗させない。
   }
+  return msg;
+}
+
+// Drive権限だけを切り分ける診断用。引数なしなのでエディタから直接実行できる。
+// 「DriveApp.getFolderById を呼び出す権限がありません」が出るかどうかを、
+// PDF書き出しやスタッフ名の指定と無関係に単体で確認できる。
+function checkDriveAccess() {
+  try {
+    const folder = DriveApp.getFolderById(PDF_ROOT_FOLDER_ID);
+    return report_('✅ Drive OK: フォルダにアクセスできました →「' + folder.getName() + '」');
+  } catch (err) {
+    return report_('❌ Drive NG: ' + err.message);
+  }
+}
+
+// PDF保存だけを試す診断用。Webフォーム経由だと通信エラーに埋もれて原因が見えないため、
+// 権限やフォルダIDの問題をGAS側だけで切り分けられるようにしている。
+// 引数なしで実行できるので、スプレッドシートのメニューからでも
+// スクリプトエディタの「実行」からでも動く。
+function testExportPdf() {
+  let name = null;
+  try {
+    name = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getName();
+  } catch (e) {
+    // エディタ実行ではアクティブシートを取れないことがあるので後段でフォールバック
+  }
+  // アクティブシートがスタッフシートでなければ、設定済みスタッフの先頭を使う
+  if (!CONFIG.STAFF_HOME[name]) {
+    name = Object.keys(CONFIG.STAFF_HOME)[0];
+  }
+
   try {
     const res = exportCommutePdf(name);
-    ui.alert('✅ ' + res);
+    return report_('✅ ' + name + ': ' + res);
   } catch (err) {
-    ui.alert('❌ ' + err.message);
+    return report_('❌ ' + name + ': ' + err.message);
   }
 }
 
