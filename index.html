@@ -306,10 +306,20 @@
         reject(new Error('通信がタイムアウトしました（' + (timeoutMs/1000) + '秒）。'));
       }, timeoutMs);
       fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) })
-        .then(function(res) { return res.json(); })
-        .then(function(json) {
+        // JSON決め打ちで読むと、GASがHTML（ログイン画面や権限エラー画面）を
+        // 返した時に「Unexpected token '<'」としか分からないため、
+        // 一旦テキストで受けてから自前でJSONに変換する。
+        .then(function(res) { return res.text(); })
+        .then(function(text) {
           if (timedOut) return;
           clearTimeout(timer);
+          var json;
+          try {
+            json = JSON.parse(text);
+          } catch (parseErr) {
+            reject(new Error(describeNonJsonResponse(text)));
+            return;
+          }
           if (!json.ok) reject(new Error(json.error || '不明なエラー'));
           else resolve(json.data);
         })
@@ -319,6 +329,28 @@
           reject(new Error('通信エラー: ' + err.message));
         });
     });
+  }
+
+  // GASがJSONではなくHTMLを返した時に、何が起きているか分かる文言に変換する。
+  // 「Unexpected token '<'」のままだと原因がデプロイ設定なのかコードなのか判別できないため。
+  function describeNonJsonResponse(text) {
+    var t = String(text == null ? '' : text);
+    if (/accounts\.google\.com|ServiceLogin|アカウントの選択|Choose an account|ログイン/i.test(t)) {
+      return 'Googleのログイン画面が返されました。GASの「デプロイを管理」→ アクセスできるユーザー を「全員」にして再デプロイしてください。';
+    }
+    if (/承認が必要|Authorization is required|requires authorization/i.test(t)) {
+      return 'GAS側の承認が未完了です。スクリプトエディタで関数を一度手動実行して権限を許可し、Webアプリを再デプロイしてください。';
+    }
+    if (/権限|permission|アクセスできません|Access denied/i.test(t)) {
+      return 'このGoogleアカウントにはWebアプリの実行権限がありません。デプロイ設定の「アクセスできるユーザー」を確認してください。';
+    }
+    if (/見つかりません|not found|does not exist|存在しません/i.test(t)) {
+      return 'デプロイURLが見つかりません。最新のデプロイURL（末尾 /exec）をGAS_URLに設定してください。';
+    }
+    if (/^\s*</.test(t)) {
+      return 'サーバーがJSONではなくHTMLを返しました。デプロイ設定（アクセスできるユーザー＝全員／実行するユーザー＝自分）と、コード変更後の再デプロイを確認してください。';
+    }
+    return 'サーバーの応答を解析できませんでした: ' + t.slice(0, 150);
   }
 
   // ---- 苗字 → フルネームの即時変換テーブル ----

@@ -9,7 +9,7 @@
 //  4. 「⚙️ 初期設定（初回のみ）」を実行 → Maps API の権限を許可
 //     ※このとき自動計算用の編集トリガー（インストール型）も登録されます。
 //     　これが無いと C列/I列を選んでも距離が自動で入らなかったり、
-//     　権限エラーで「取得エラー」になったりします。
+//     　権限エラーで距離取得に失敗したりします。
 //  5. 以降は月を変えたら「🗓️ 月を更新」を実行
 //
 //  【日々の使い方】
@@ -17,6 +17,20 @@
 //    → I列（高速 有/無）をプルダウンで選択
 //    → 距離が自動で入ります
 //  ・G列・H列は高速代（円）を手入力
+//
+//  【Web入力フォーム（GitHub Pages）対応】
+//  ・doPost経由でスプレッドシートを直接触らずに入力できる関数群を追加
+//  ・PDF保存先フォルダIDは PDF_ROOT_FOLDER_ID に設定済み
+//  ・稼働場所の追加・編集・削除もWebフォームから可能
+//
+//  【Webフォームで「Unexpected token '<'」が出る場合】
+//  JSONではなくHTML（Googleのログイン画面や権限エラー画面）が返っています。
+//  doPostの中で起きた例外はJSONで返るため、これはコードではなくデプロイ設定側の問題です。
+//  ・デプロイを管理 → 実行するユーザー: 自分
+//  ・デプロイを管理 → アクセスできるユーザー: 全員
+//  ・コードに新しいサービス（DriveApp/UrlFetchApp等）を足したら必ず再デプロイ
+//  デプロイURL（末尾 /exec）をブラウザで直接開くと doGet が状態JSONを返すので、
+//  そこでログイン画面が出るなら上記のアクセス設定が原因です。
 // ============================================================
 
 const CONFIG = {
@@ -25,6 +39,7 @@ const CONFIG = {
   dataStartRow: 6,     // データ開始行
   MONTH_ROW: 2,
   MONTH_COL: 7,        // G2: 月入力セル
+  IRREGULAR_ROWS: 3,   // イレギュラー（稼働場所以外）の自由記述行数
 
   // 列番号（1始まり）
   COL: {
@@ -54,7 +69,14 @@ const CONFIG = {
   ROUTE_CACHE_SEC: 21600,             // 同一経路の距離キャッシュ保持時間（秒・最大6時間）
 };
 
+// ▼▼▼ PDF保存先のGoogle DriveフォルダID ▼▼▼
+const PDF_ROOT_FOLDER_ID = "1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o";
+
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
+
+// 距離取得に失敗した時に備考(K列)へ書くメッセージの接頭辞。
+// 手入力の備考を消さずに、スクリプトが書いたものだけをクリアするための目印。
+const DIST_NOTE_PREFIXES = ['距離取得エラー', '自宅未登録', '住所未登録'];
 
 // ── カスタムメニュー ─────────────────────────────────────────
 function onOpen() {
@@ -66,6 +88,7 @@ function onOpen() {
     .addSeparator()
     .addItem('⚙️ 初期設定（初回のみ）', 'initialSetup')
     .addItem('🔌 自動計算トリガーを再設定', 'installEditTriggerFromMenu')
+    .addItem('🩺 PDF保存をテスト', 'testExportPdf')
     .addToUi();
 }
 
@@ -79,7 +102,6 @@ function initialSetup() {
     return;
   }
 
-  // 全スタッフシートにプルダウンを設定
   Object.keys(CONFIG.STAFF_HOME).forEach(name => {
     const sheet = ss.getSheetByName(name);
     if (!sheet) return;
@@ -113,7 +135,26 @@ function installEditTrigger() {
     .create();
 }
 
-// ── 月更新 ───────────────────────────────────────────────────
+// スプレッドシートのメニューからPDF保存だけを試す診断用。
+// Webフォーム経由だとHTMLエラーに埋もれて原因が見えないため、
+// 権限やフォルダIDの問題をGAS側だけで切り分けられるようにしている。
+function testExportPdf() {
+  const ui = SpreadsheetApp.getUi();
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const name = sheet.getName();
+  if (!CONFIG.STAFF_HOME[name]) {
+    ui.alert('スタッフシートを選択してから実行してください。');
+    return;
+  }
+  try {
+    const res = exportCommutePdf(name);
+    ui.alert('✅ ' + res);
+  } catch (err) {
+    ui.alert('❌ ' + err.message);
+  }
+}
+
+// ── 月更新（スプレッドシートのメニューから実行する場合） ───────
 function updateMonth() {
   const ss  = SpreadsheetApp.getActiveSpreadsheet();
   const ui  = SpreadsheetApp.getUi();
@@ -145,56 +186,103 @@ function buildMonthRows(sheet, month) {
   const C    = CONFIG.COL;
   const startRow = CONFIG.dataStartRow;
   const daysInMonth = new Date(year, month, 0).getDate();
+  const IRREG_ROWS = CONFIG.IRREGULAR_ROWS;
 
-  // 既存データをクリア（最大31日分 + 旧合計行を含めて余裕を持ってクリア）
-  // 31日の月から30日の月に変えた際、旧合計行（startRow+31）が残らないよう
-  // 32行分（データ31日 + 合計行1）をクリア対象にする
-  sheet.getRange(startRow, 1, 32, 11).clearContent().clearFormat();
+  const FIXED_DAYS    = 31;
+  const headRow       = startRow + FIXED_DAYS;
+  const irregStart    = headRow + 1;
+  const irregEnd      = irregStart + IRREG_ROWS - 1;
+  const totalRow       = irregEnd + 1;
 
-  // ベースのボーダー・書式を再設定
-  const dataRange = sheet.getRange(startRow, 1, daysInMonth, 11);
+  sheet.getRange(startRow, 1, FIXED_DAYS, 11).clearContent().clearFormat();
+
+  const dataRange = sheet.getRange(startRow, 1, FIXED_DAYS, 11);
   dataRange.setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
 
-  for (let day = 1; day <= daysInMonth; day++) {
+  for (let day = 1; day <= FIXED_DAYS; day++) {
     const row = startRow + day - 1;
-    // タイムゾーンズレ完全回避: DATE関数で日付をセット
+
+    if (day > daysInMonth) {
+      sheet.hideRows(row);
+      continue;
+    }
+    sheet.showRows(row);
+
     sheet.getRange(row, C.DATE)
       .setFormula(`=DATE(${year},${month},${day})`)
       .setNumberFormat('m/d')
       .setHorizontalAlignment('center');
-    const wd = new Date(year, month - 1, day).getDay();  // 0=日, 6=土
+    const wd = new Date(year, month - 1, day).getDay();
     const isWe = wd === 0 || wd === 6;
 
-    // B: 曜日
     const wdColor = wd === 0 ? '#CC0000' : (wd === 6 ? '#0070C0' : '#333333');
     sheet.getRange(row, C.WEEKDAY)
       .setValue(WEEKDAY_JA[wd])
       .setFontColor(wdColor)
       .setHorizontalAlignment('center');
 
-    // 土日の背景色
     if (isWe) {
       sheet.getRange(row, 1, 1, 11).setBackground('#F0F0F0');
     }
 
-    // G・H列（高速代）の書式
     sheet.getRange(row, C.TOLL_GO).setNumberFormat('#,##0').setBackground(isWe ? '#F0F0F0' : '#EBF5FB');
     sheet.getRange(row, C.TOLL_BACK).setNumberFormat('#,##0').setBackground(isWe ? '#F0F0F0' : '#EBF5FB');
   }
 
-  // 合計行（データ日数の直後1行のみ。前月分の余り行は上のclearContentで消去済み）
-  const totalRow = startRow + daysInMonth;
-  const lastRow  = startRow + daysInMonth - 1;
-  sheet.getRange(totalRow, 1, 1, 11).setBorder(true, true, true, true, true, true, '#999999', SpreadsheetApp.BorderStyle.SOLID);
-  sheet.getRange(totalRow, 1).setValue('合　　計').setFontWeight('bold').setHorizontalAlignment('center').setBackground('#FFF2CC');
-  sheet.getRange(totalRow, 1, 1, 11).setBackground('#FFF2CC');
-  sheet.getRange(totalRow, C.DIST_TOTAL).setFormula(`=SUM(F${startRow}:F${lastRow})`).setNumberFormat('#,##0.000"km"').setFontWeight('bold');
-  sheet.getRange(totalRow, C.TOLL_GO).setFormula(`=SUM(G${startRow}:G${lastRow})`).setNumberFormat('#,##0"円"').setFontWeight('bold');
-  sheet.getRange(totalRow, C.TOLL_BACK).setFormula(`=SUM(H${startRow}:H${lastRow})`).setNumberFormat('#,##0"円"').setFontWeight('bold');
-  sheet.getRange(totalRow, C.TOTAL_AMT).setFormula(`=SUM(J${startRow}:J${lastRow})`).setNumberFormat('#,##0"円"').setFontWeight('bold').setFontSize(13);
+  ensureIrregularSection(sheet, headRow, irregStart, irregEnd);
 
-  // 稼働日数（C列の非空白カウント）
-  sheet.getRange(2, 9).setFormula(`=COUNTA(C${startRow}:C${lastRow})`);
+  const lastCalRow = startRow + daysInMonth - 1;
+  sheet.getRange(totalRow, 1, 1, 11).setBorder(true, true, true, true, true, true, '#999999', SpreadsheetApp.BorderStyle.SOLID);
+  sheet.getRange(totalRow, 1).setValue('合　　計').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange(totalRow, 1, 1, 11).setBackground('#FFF2CC');
+  sheet.getRange(totalRow, C.DIST_TOTAL).setFormula(`=SUM(F${startRow}:F${lastCalRow})`).setNumberFormat('#,##0.000"km"').setFontWeight('bold');
+  sheet.getRange(totalRow, C.TOLL_GO).setFormula(`=SUM(G${startRow}:G${lastCalRow})`).setNumberFormat('#,##0"円"').setFontWeight('bold');
+  sheet.getRange(totalRow, C.TOLL_BACK).setFormula(`=SUM(H${startRow}:H${lastCalRow})`).setNumberFormat('#,##0"円"').setFontWeight('bold');
+  sheet.getRange(totalRow, C.TOTAL_AMT)
+    .setFormula(`=SUM(J${startRow}:J${lastCalRow})+SUM(J${irregStart}:J${irregEnd})`)
+    .setNumberFormat('#,##0"円"').setFontWeight('bold').setFontSize(13);
+
+  sheet.getRange(2, 9).setFormula(`=COUNTA(C${startRow}:C${lastCalRow})`);
+}
+
+// ── イレギュラー枠（見出し+3行）の書式を保証 ─────────────────
+function ensureIrregularSection(sheet, headRow, irregStart, irregEnd) {
+  const C = CONFIG.COL;
+
+  sheet.getRange(headRow, 1, 1, 11).breakApart();
+  sheet.getRange(headRow, 1, 1, 11).merge();
+  sheet.getRange(headRow, 1)
+    .setValue('◆ イレギュラー（稼働場所以外の特別対応・出張等）　※自由記述')
+    .setFontWeight('bold')
+    .setFontColor('#FFFFFF')
+    .setBackground('#C0504D')
+    .setHorizontalAlignment('center')
+    .setFontSize(9);
+  sheet.getRange(headRow, 1, 1, 11).setBorder(true, true, true, true, true, true, '#999999', SpreadsheetApp.BorderStyle.SOLID);
+
+  for (let r = irregStart; r <= irregEnd; r++) {
+    sheet.getRange(r, 1, 1, 2).breakApart();
+    sheet.getRange(r, 1, 1, 2).merge();
+    sheet.getRange(r, 1, 1, 2).setBackground('#FCE4D6').setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
+    sheet.getRange(r, 1).setNumberFormat('m/d');
+
+    sheet.getRange(r, 3, 1, 4).breakApart();
+    sheet.getRange(r, 3, 1, 4).merge();
+    sheet.getRange(r, 3).setBackground('#FCE4D6').setHorizontalAlignment('left').setFontSize(10);
+    sheet.getRange(r, 3, 1, 4).setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
+
+    sheet.getRange(r, 7, 1, 2).breakApart();
+    sheet.getRange(r, 7, 1, 2).merge();
+    sheet.getRange(r, 7, 1, 2).setBackground('#FCE4D6').setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
+
+    sheet.getRange(r, 9).setBackground('#FCE4D6').setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
+
+    sheet.getRange(r, 10).setBackground('#FCE4D6').setNumberFormat('#,##0').setHorizontalAlignment('right').setFontSize(10);
+    sheet.getRange(r, 10).setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
+
+    sheet.getRange(r, 11).setBackground('#FCE4D6').setHorizontalAlignment('left').setFontSize(10);
+    sheet.getRange(r, 11).setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
+  }
 }
 
 // ── プルダウン設定 ───────────────────────────────────────────
@@ -203,25 +291,22 @@ function setupDropdowns(sheet) {
   const placeSheet = ss.getSheetByName(CONFIG.PLACE_SHEET);
   if (!placeSheet) return;
 
-  const month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
-  const daysInMonth = new Date(CONFIG.year, month, 0).getDate();
   const startRow = CONFIG.dataStartRow;
   const C = CONFIG.COL;
+  const FIXED_DAYS = 31;
 
-  // C列: 稼働場所プルダウン（稼働場所シートのA列全件）
   const lastPlaceRow = placeSheet.getLastRow();
   const placeRule = SpreadsheetApp.newDataValidation()
     .requireValueInRange(placeSheet.getRange(`A2:A${lastPlaceRow}`), true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(startRow, C.PLACE, daysInMonth, 1).setDataValidation(placeRule);
+  sheet.getRange(startRow, C.PLACE, FIXED_DAYS, 1).setDataValidation(placeRule);
 
-  // I列: 高速 有/無 プルダウン
   const hwRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['無', '有'], true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(startRow, C.HIGHWAY, daysInMonth, 1).setDataValidation(hwRule);
+  sheet.getRange(startRow, C.HIGHWAY, FIXED_DAYS, 1).setDataValidation(hwRule);
 }
 
 // ── handleEdit: C列(場所)またはI列(高速有無)の変更を検知 ────
@@ -237,19 +322,14 @@ function handleEdit(e) {
   const editedCol = e.range.getColumn();
   const editedRow = e.range.getRow();
   const C = CONFIG.COL;
-  const month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
-  if (!month) return;
-  const daysInMonth  = new Date(CONFIG.year, month, 0).getDate();
   const startRow     = CONFIG.dataStartRow;
-  const lastDataRow  = startRow + daysInMonth - 1;
+  const lastDataRow  = startRow + 31 - 1;
 
-  // C列（場所）またはI列（高速有無）の変更
   if ((editedCol === C.PLACE || editedCol === C.HIGHWAY)
       && editedRow >= startRow && editedRow <= lastDataRow) {
     updateRowDistance(sheet, staffName, editedRow);
   }
 
-  // G・H列（高速代）の変更 → 合計金額を再計算
   if ((editedCol === C.TOLL_GO || editedCol === C.TOLL_BACK)
       && editedRow >= startRow && editedRow <= lastDataRow) {
     setTotalFormula(sheet, editedRow);
@@ -260,19 +340,17 @@ function handleEdit(e) {
 function updateRowDistance(sheet, staffName, row) {
   const C          = CONFIG.COL;
   const placeShort = sheet.getRange(row, C.PLACE).getValue();
-  const highway    = sheet.getRange(row, C.HIGHWAY).getValue();  // '有' or '無'
+  const highway    = sheet.getRange(row, C.HIGHWAY).getValue();
 
-  // 場所が空なら距離もクリア
   if (!placeShort) {
-    sheet.getRange(row, C.DIST_GO, 1, 4).clearContent();
-    sheet.getRange(row, C.NOTE).clearContent();
+    sheet.getRange(row, C.DIST_GO, 1, 3).clearContent();
+    clearDistanceNote(sheet, row);
     return;
   }
 
   const ss       = SpreadsheetApp.getActiveSpreadsheet();
   const placeMap = getPlaceMap(ss);
 
-  // 自宅住所（稼働場所リストの「○○自宅」を参照）
   const homeShort = CONFIG.STAFF_HOME[staffName];
   const homeAddr  = placeMap[homeShort];
   const destAddr  = placeMap[placeShort];
@@ -288,8 +366,6 @@ function updateRowDistance(sheet, staffName, row) {
     return;
   }
 
-  // 高速有無でルートタイプを切替
-  // '有' → highway（高速利用）, '無' または未選択 → drive（一般道）
   const routeType = (highway === '有') ? 'highway' : 'drive';
 
   try {
@@ -301,7 +377,7 @@ function updateRowDistance(sheet, staffName, row) {
     sheet.getRange(row, C.DIST_TOTAL)
       .setFormula(`=IF(AND(ISNUMBER(D${row}),ISNUMBER(E${row})),D${row}+E${row},"")`)
       .setNumberFormat('#,##0.000');
-    sheet.getRange(row, C.NOTE).clearContent();
+    clearDistanceNote(sheet, row);
     setTotalFormula(sheet, row);
   } catch(err) {
     // D列（数値列）にエラー文字列を入れると、合計行の SUM(F...) が
@@ -317,6 +393,16 @@ function updateRowDistance(sheet, staffName, row) {
 function clearDistanceCells(sheet, row) {
   const C = CONFIG.COL;
   sheet.getRange(row, C.DIST_GO, 1, 3).clearContent(); // D,E,F
+}
+
+// 備考(K列)のうち、スクリプトが書いたエラーメッセージだけを消す。
+// 手入力の備考を巻き込んで消さないよう、既知の接頭辞に一致する場合のみクリアする。
+function clearDistanceNote(sheet, row) {
+  const cell = sheet.getRange(row, CONFIG.COL.NOTE);
+  const val  = String(cell.getValue() || '');
+  if (!val) return;
+  const isOurs = DIST_NOTE_PREFIXES.some(p => val.indexOf(p) === 0);
+  if (isOurs) cell.clearContent();
 }
 
 // ── 合計金額の数式をセット ───────────────────────────────────
@@ -366,7 +452,6 @@ function refreshAllDistances() {
 }
 
 // ── 場所マスタ読み込み（短縮名 → 住所） ─────────────────────
-// 稼働場所シート: A列=短縮名, B列=住所
 function getPlaceMap(ss) {
   const sheet = ss.getSheetByName(CONFIG.PLACE_SHEET);
   if (!sheet) return {};
@@ -420,16 +505,13 @@ function mapQuery(src, dest, type, result) {
 
   switch (type) {
     case 'highway':
-      // 高速道路を使う（制限なし）
       finder.setMode(Maps.DirectionFinder.Mode.DRIVING);
       break;
     case 'drive':
-      // 一般道のみ（有料道路・高速を回避）
       finder.setMode(Maps.DirectionFinder.Mode.DRIVING)
             .setAvoid(Maps.DirectionFinder.Avoid.TOLLS);
       break;
     case 'toll':
-      // 高速は使わない（toll道路回避）
       finder.setMode(Maps.DirectionFinder.Mode.DRIVING)
             .setAvoid(Maps.DirectionFinder.Avoid.HIGHWAYS);
       break;
@@ -446,10 +528,485 @@ function mapQuery(src, dest, type, result) {
       finder.setMode(Maps.DirectionFinder.Mode.DRIVING);
   }
 
-  const route = finder.getDirections().routes[0];
+  const directions = finder.getDirections();
+  if (!directions || !directions.routes || !directions.routes.length) {
+    throw new Error('経路が見つかりません（住所を確認してください）');
+  }
+  const route = directions.routes[0];
   const leg   = route.legs[0];
 
-  if (result === 'distance') return leg.distance.value / 1000;   // km
-  if (result === 'duration') return leg.duration.value / 60;     // 分
+  if (result === 'distance') return leg.distance.value / 1000;
+  if (result === 'duration') return leg.duration.value / 60;
   return leg;
+}
+
+
+// ============================================================
+//  ここから下：GitHub Pages版フロントエンド（fetch通信）対応
+// ============================================================
+
+// ── デプロイ確認用（ブラウザで /exec を直接開いた時に返る） ────
+// ここでログイン画面やエラーHTMLが出る場合、原因はコードではなく
+// デプロイ設定（アクセスできるユーザー）です。
+function doGet(e) {
+  var info = { status: 'ready', time: new Date().toISOString() };
+  try {
+    info.effectiveUser = Session.getEffectiveUser().getEmail();
+  } catch (err) {
+    info.effectiveUser = '(取得不可)';
+  }
+  return ContentService.createTextOutput(JSON.stringify({ ok: true, data: info }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── Webアプリのエントリーポイント ───────────────────────────
+function doPost(e) {
+  var out;
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      throw new Error('リクエスト本文が空です');
+    }
+    var req = JSON.parse(e.postData.contents);
+    var action = req.action;
+    var data;
+
+    if (action === 'getStaffList') {
+      data = Object.keys(CONFIG.STAFF_HOME);
+    } else if (action === 'getMonthInfo') {
+      data = getMonthInfoWeb(req.staffName);
+    } else if (action === 'getPlaceList') {
+      data = getPlaceListWeb();
+    } else if (action === 'getPlaceListManage') {
+      data = getPlaceListManage();
+    } else if (action === 'addPlace') {
+      data = addPlaceWeb(req.name, req.address);
+    } else if (action === 'updatePlace') {
+      data = updatePlaceWeb(req.row, req.name, req.address);
+    } else if (action === 'deletePlace') {
+      data = deletePlaceWeb(req.row);
+    } else if (action === 'submitCommute') {
+      data = submitCommute(req.staffName, req.data);
+    } else if (action === 'submitIrregular') {
+      data = submitIrregular(req.staffName, req.data);
+    } else if (action === 'getMyEntries') {
+      data = getMyEntries(req.staffName);
+    } else if (action === 'deleteNormalEntry') {
+      data = deleteNormalEntry(req.staffName, req.day);
+    } else if (action === 'deleteIrregularEntry') {
+      data = deleteIrregularEntry(req.staffName, req.row);
+    } else if (action === 'resetMonth') {
+      data = resetMonthWeb(req.staffName, req.month);
+    } else if (action === 'exportPdf') {
+      data = exportCommutePdf(req.staffName);
+    } else {
+      throw new Error('不明なaction: ' + action);
+    }
+
+    out = { ok: true, data: data };
+  } catch (err) {
+    out = { ok: false, error: err.message };
+  }
+  return ContentService.createTextOutput(JSON.stringify(out))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── スタッフ名からシートを取得 ────────────────────────────
+function getCommuteSheet(staffName) {
+  if (!CONFIG.STAFF_HOME[staffName]) {
+    throw new Error('不明なスタッフです: ' + staffName);
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(staffName);
+  if (!sheet) {
+    throw new Error('シートが見つかりません: ' + staffName);
+  }
+  return sheet;
+}
+
+// ── イレギュラー行の範囲（固定計算） ─────────────────────────
+function getIrregularRowRange() {
+  var startRow = CONFIG.dataStartRow;      // 6
+  var FIXED_DAYS = 31;
+  var headRow = startRow + FIXED_DAYS;     // 37
+  var irregStart = headRow + 1;            // 38
+  var irregEnd = irregStart + CONFIG.IRREGULAR_ROWS - 1; // 40
+  return { irregStart: irregStart, irregEnd: irregEnd };
+}
+
+// ── 月情報＋入力済みの日を返す（フォーム表示用） ─────────────
+function getMonthInfoWeb(staffName) {
+  var sheet = getCommuteSheet(staffName);
+  var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+  var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
+  var C = CONFIG.COL;
+
+  var filledDays = [];
+  for (var d = 1; d <= daysInMonth; d++) {
+    var row = CONFIG.dataStartRow + d - 1;
+    var place = sheet.getRange(row, C.PLACE).getValue();
+    if (place) filledDays.push(d);
+  }
+
+  var range = getIrregularRowRange();
+  var irregularCount = 0;
+  for (var r = range.irregStart; r <= range.irregEnd; r++) {
+    var content = sheet.getRange(r, C.PLACE).getValue();
+    if (content) irregularCount++;
+  }
+
+  return {
+    year: CONFIG.year,
+    month: month,
+    daysInMonth: daysInMonth,
+    filledDays: filledDays,
+    irregularCount: irregularCount,
+    irregularCapacity: CONFIG.IRREGULAR_ROWS
+  };
+}
+
+// ── 稼働場所の一覧を返す（自宅は除外、Web入力タブ用） ────────
+function getPlaceListWeb() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CONFIG.PLACE_SHEET);
+  if (!sheet) return [];
+  var rows = sheet.getDataRange().getValues();
+  var list = [];
+  for (var i = 1; i < rows.length; i++) {
+    var name = String(rows[i][0]).trim();
+    if (name && name.indexOf('自宅') === -1) list.push(name);
+  }
+  return list;
+}
+
+// ── 稼働場所マスタの管理（一覧・追加・編集・削除） ─────────────
+function getPlaceListManage() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CONFIG.PLACE_SHEET);
+  if (!sheet) return [];
+  var rows = sheet.getDataRange().getValues();
+  var list = [];
+  for (var i = 1; i < rows.length; i++) {
+    var name = String(rows[i][0]).trim();
+    var addr = String(rows[i][1]).trim();
+    if (!name) continue;
+    if (name.indexOf('自宅') !== -1) continue; // 自宅はスタッフ設定に連動するため管理対象外
+    list.push({ row: i + 1, name: name, address: addr });
+  }
+  return list;
+}
+
+function addPlaceWeb(name, address) {
+  name = String(name || '').trim();
+  address = String(address || '').trim();
+  if (!name) throw new Error('場所の名称を入力してください');
+  if (!address) throw new Error('住所を入力してください');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CONFIG.PLACE_SHEET);
+  if (!sheet) throw new Error('「稼働場所」シートが見つかりません');
+
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]).trim() === name) {
+      throw new Error('「' + name + '」は既に登録されています');
+    }
+  }
+
+  sheet.appendRow([name, address]);
+  refreshAllStaffDropdowns();
+  return 'OK';
+}
+
+function updatePlaceWeb(row, name, address) {
+  row = Number(row);
+  name = String(name || '').trim();
+  address = String(address || '').trim();
+  if (!name) throw new Error('場所の名称を入力してください');
+  if (!address) throw new Error('住所を入力してください');
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CONFIG.PLACE_SHEET);
+  if (!sheet) throw new Error('「稼働場所」シートが見つかりません');
+  if (row < 2 || row > sheet.getLastRow()) throw new Error('対象の行が不正です');
+
+  var oldName = String(sheet.getRange(row, 1).getValue()).trim();
+
+  var rows = sheet.getDataRange().getValues();
+  for (var i = 1; i < rows.length; i++) {
+    if (i + 1 !== row && String(rows[i][0]).trim() === name) {
+      throw new Error('「' + name + '」は既に登録されています');
+    }
+  }
+
+  sheet.getRange(row, 1).setValue(name);
+  sheet.getRange(row, 2).setValue(address);
+
+  // 名称が変わった場合、既存の稼働実績（C列）の表記も追随させる
+  if (oldName && oldName !== name) {
+    renamePlaceInStaffSheets(oldName, name);
+  }
+
+  refreshAllStaffDropdowns();
+  return 'OK';
+}
+
+function deletePlaceWeb(row) {
+  row = Number(row);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(CONFIG.PLACE_SHEET);
+  if (!sheet) throw new Error('「稼働場所」シートが見つかりません');
+  if (row < 2 || row > sheet.getLastRow()) throw new Error('対象の行が不正です');
+
+  var name = String(sheet.getRange(row, 1).getValue()).trim();
+  if (name.indexOf('自宅') !== -1) {
+    throw new Error('自宅の設定はここからは削除できません');
+  }
+
+  sheet.deleteRow(row);
+  refreshAllStaffDropdowns();
+  return 'OK';
+}
+
+// ── 全スタッフシートのプルダウンを再設定 ─────────────────────
+function refreshAllStaffDropdowns() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  Object.keys(CONFIG.STAFF_HOME).forEach(function(name) {
+    var sheet = ss.getSheetByName(name);
+    if (sheet) setupDropdowns(sheet);
+  });
+}
+
+// ── 稼働場所名の変更を各スタッフシートのC列に反映 ─────────────
+function renamePlaceInStaffSheets(oldName, newName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var C = CONFIG.COL;
+  var startRow = CONFIG.dataStartRow;
+  var FIXED_DAYS = 31;
+
+  Object.keys(CONFIG.STAFF_HOME).forEach(function(staffName) {
+    var sheet = ss.getSheetByName(staffName);
+    if (!sheet) return;
+    var range = sheet.getRange(startRow, C.PLACE, FIXED_DAYS, 1);
+    var values = range.getValues();
+    var changed = false;
+    for (var i = 0; i < values.length; i++) {
+      if (String(values[i][0]).trim() === oldName) {
+        values[i][0] = newName;
+        changed = true;
+      }
+    }
+    if (changed) range.setValues(values);
+  });
+}
+
+// ── 通常入力：開始日〜終了日の範囲にまとめて書き込み ─────────
+// data = { startDay, endDay, place, highway, tollGo, tollBack }
+function submitCommute(staffName, data) {
+  var sheet = getCommuteSheet(staffName);
+  var C = CONFIG.COL;
+  var startDay = Number(data.startDay);
+  var endDay = Number(data.endDay) || startDay;
+  if (endDay < startDay) { var tmp = startDay; startDay = endDay; endDay = tmp; }
+
+  for (var day = startDay; day <= endDay; day++) {
+    var row = CONFIG.dataStartRow + day - 1;
+    sheet.getRange(row, C.PLACE).setValue(data.place);
+    sheet.getRange(row, C.HIGHWAY).setValue(data.highway === '有' ? '有' : '無');
+
+    if (data.highway === '有') {
+      sheet.getRange(row, C.TOLL_GO).setValue(data.tollGo ? Number(data.tollGo) : '');
+      sheet.getRange(row, C.TOLL_BACK).setValue(data.tollBack ? Number(data.tollBack) : '');
+    } else {
+      sheet.getRange(row, C.TOLL_GO).clearContent();
+      sheet.getRange(row, C.TOLL_BACK).clearContent();
+    }
+
+    updateRowDistance(sheet, staffName, row);
+  }
+
+  return { updatedDays: endDay - startDay + 1 };
+}
+
+// ── イレギュラー入力：空いている枠に書き込み ─────────────────
+// data = { day, content, distanceKm }
+function submitIrregular(staffName, data) {
+  var sheet = getCommuteSheet(staffName);
+  var C = CONFIG.COL;
+  var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+  var range = getIrregularRowRange();
+
+  var targetRow = null;
+  for (var r = range.irregStart; r <= range.irregEnd; r++) {
+    var content = sheet.getRange(r, C.PLACE).getValue();
+    if (!content) { targetRow = r; break; }
+  }
+  if (!targetRow) {
+    throw new Error('イレギュラー枠が上限（' + CONFIG.IRREGULAR_ROWS + '件）に達しています。確認・修正タブから既存の項目を削除してください。');
+  }
+
+  var distanceKm = Number(data.distanceKm) || 0;
+  var amount = Math.round(distanceKm * CONFIG.ratePerKm);
+
+  sheet.getRange(targetRow, 1).setValue(new Date(CONFIG.year, month - 1, Number(data.day))).setNumberFormat('m/d');
+  sheet.getRange(targetRow, C.PLACE).setValue(data.content);
+  sheet.getRange(targetRow, C.TOTAL_AMT).setValue(amount);
+  sheet.getRange(targetRow, C.NOTE).setValue(distanceKm ? (distanceKm + 'km') : '');
+
+  return { row: targetRow, amount: amount };
+}
+
+// ── その月の入力済み一覧（通常＋イレギュラー） ───────────────
+function getMyEntries(staffName) {
+  var sheet = getCommuteSheet(staffName);
+  var C = CONFIG.COL;
+  var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+  var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
+
+  var results = [];
+
+  for (var d = 1; d <= daysInMonth; d++) {
+    var row = CONFIG.dataStartRow + d - 1;
+    var place = sheet.getRange(row, C.PLACE).getValue();
+    if (!place) continue;
+    results.push({
+      type: 'normal',
+      day: d,
+      place: place,
+      highway: sheet.getRange(row, C.HIGHWAY).getValue(),
+      tollGo: sheet.getRange(row, C.TOLL_GO).getValue(),
+      tollBack: sheet.getRange(row, C.TOLL_BACK).getValue(),
+      amount: sheet.getRange(row, C.TOTAL_AMT).getValue(),
+      row: row
+    });
+  }
+
+  var range = getIrregularRowRange();
+  for (var r = range.irregStart; r <= range.irregEnd; r++) {
+    var content = sheet.getRange(r, C.PLACE).getValue();
+    if (!content) continue;
+    var dateVal = sheet.getRange(r, 1).getValue();
+    var day = (dateVal instanceof Date) ? dateVal.getDate() : null;
+    results.push({
+      type: 'irregular',
+      day: day,
+      content: content,
+      amount: sheet.getRange(r, C.TOTAL_AMT).getValue(),
+      note: sheet.getRange(r, C.NOTE).getValue(),
+      row: r
+    });
+  }
+
+  results.sort(function(a, b) { return (a.day || 99) - (b.day || 99); });
+  return results;
+}
+
+// ── 通常入力の1日分を削除 ────────────────────────────────────
+function deleteNormalEntry(staffName, day) {
+  var sheet = getCommuteSheet(staffName);
+  var C = CONFIG.COL;
+  var row = CONFIG.dataStartRow + Number(day) - 1;
+
+  sheet.getRange(row, C.PLACE).clearContent();
+  sheet.getRange(row, C.DIST_GO).clearContent();
+  sheet.getRange(row, C.DIST_BACK).clearContent();
+  sheet.getRange(row, C.TOLL_GO).clearContent();
+  sheet.getRange(row, C.TOLL_BACK).clearContent();
+  sheet.getRange(row, C.HIGHWAY).clearContent();
+  clearDistanceNote(sheet, row);
+  // DIST_TOTAL(F)・TOTAL_AMT(J)は数式なのでそのまま。C・D・Eが空になれば自動で空欄評価される
+
+  return 'OK';
+}
+
+// ── イレギュラー入力の1件を削除 ──────────────────────────────
+function deleteIrregularEntry(staffName, row) {
+  var sheet = getCommuteSheet(staffName);
+  var C = CONFIG.COL;
+  row = Number(row);
+  var range = getIrregularRowRange();
+  if (row < range.irregStart || row > range.irregEnd) {
+    throw new Error('削除対象の行が不正です');
+  }
+
+  sheet.getRange(row, 1).clearContent();
+  sheet.getRange(row, C.PLACE).clearContent();
+  sheet.getRange(row, C.TOTAL_AMT).clearContent();
+  sheet.getRange(row, C.NOTE).clearContent();
+
+  return 'OK';
+}
+
+// ── 対象月の変更（カレンダー行を再生成） ─────────────────────
+function resetMonthWeb(staffName, month) {
+  var sheet = getCommuteSheet(staffName);
+  month = Number(month);
+  if (!month || month < 1 || month > 12) {
+    throw new Error('月の指定が不正です');
+  }
+  sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).setValue(month);
+  buildMonthRows(sheet, month);
+  setupDropdowns(sheet);
+  return { year: CONFIG.year, month: month };
+}
+
+// ── Google DriveへPDF保存（指定フォルダへ直接保存） ──────────
+function exportCommutePdf(staffName) {
+  if (!PDF_ROOT_FOLDER_ID) {
+    throw new Error('PDF保存先フォルダが未設定です。PDF_ROOT_FOLDER_IDを設定してください。');
+  }
+  var sheet = getCommuteSheet(staffName);
+  var ss = sheet.getParent();
+  var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+
+  // フォルダIDの誤りとアクセス権不足を区別できるようにメッセージを付ける
+  var targetFolder;
+  try {
+    targetFolder = DriveApp.getFolderById(PDF_ROOT_FOLDER_ID);
+  } catch (err) {
+    throw new Error('PDF保存先フォルダにアクセスできません（ID: ' + PDF_ROOT_FOLDER_ID + '）。'
+      + 'スクリプトの実行アカウントにこのフォルダの編集権限があるか確認してください。');
+  }
+
+  var fileName = CONFIG.year + '年' + month + '月_' + staffName + '_稼働費.pdf';
+  var pdfBlob = exportCommuteSheetAsPdf(ss, sheet).setName(fileName);
+
+  var existingFiles = targetFolder.getFilesByName(fileName);
+  while (existingFiles.hasNext()) {
+    existingFiles.next().setTrashed(true);
+  }
+  targetFolder.createFile(pdfBlob);
+
+  return '保存完了';
+}
+
+function exportCommuteSheetAsPdf(ss, sheet) {
+  // ss.getUrl() は末尾が "/edit" とは限らず（#gid=... が付く等）、
+  // replace(/edit$/, "") だと ".../editexport" のような壊れたURLになり、
+  // PDFではなくHTMLのエラーページを保存してしまう。IDから組み立てる方が確実。
+  var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export'
+    + '?exportFormat=pdf&format=pdf'
+    + '&gid=' + sheet.getSheetId()
+    + '&size=A4&portrait=false&fitw=true'
+    + '&sheetnames=false&printtitle=false&pagenumbers=false'
+    + '&gridlines=false&fzr=false';
+
+  var response = UrlFetchApp.fetch(exportUrl, {
+    headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
+    muteHttpExceptions: true
+  });
+
+  var code = response.getResponseCode();
+  if (code !== 200) {
+    throw new Error('PDFの書き出しに失敗しました（HTTP ' + code + '）。'
+      + 'スクリプトの実行アカウントにこのスプレッドシートの閲覧権限があるか確認してください。');
+  }
+
+  var blob = response.getBlob();
+  // 権限が無い場合はPDFではなくHTMLのログイン画面が200で返ることがある。
+  // そのまま保存すると中身がHTMLの「.pdf」ができてしまうので弾く。
+  if (String(blob.getContentType() || '').indexOf('pdf') === -1) {
+    throw new Error('PDFではなくHTMLが返されました。Webアプリの「実行するユーザー」設定と、'
+      + 'そのアカウントのスプレッドシート閲覧権限を確認してください。');
+  }
+  return blob;
 }
