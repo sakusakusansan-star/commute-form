@@ -326,9 +326,24 @@
         .catch(function(err) {
           if (timedOut) return;
           clearTimeout(timer);
-          reject(new Error('通信エラー: ' + err.message));
+          reject(new Error(describeFetchError(err)));
         });
     });
+  }
+
+  // fetch自体が失敗した（サーバーの応答を受け取れなかった）ケースの説明。
+  // GASのWebアプリはPOSTすると script.googleusercontent.com へリダイレクトするため、
+  // 公開設定が「全員」でないとログイン画面へ飛ばされ、CORSでブロックされて
+  // 「Failed to fetch」になる。原因が分かる文言に変換する。
+  function describeFetchError(err) {
+    var msg = (err && err.message) ? err.message : String(err);
+    if (/Failed to fetch|NetworkError|Load failed|ネットワーク/i.test(msg)) {
+      return 'サーバーに接続できませんでした。次の2点を確認してください。'
+        + '(1) GASの「アクセスできるユーザー」が【全員】になっているか'
+        + '（「Googleアカウントを持つ全員」だとログイン画面へ飛ばされ、この エラーになります）。'
+        + '(2) 再デプロイでURLが変わっていないか（GAS_URLが最新の /exec か）。';
+    }
+    return '通信エラー: ' + msg;
   }
 
   // GASがJSONではなくHTMLを返した時に、何が起きているか分かる文言に変換する。
