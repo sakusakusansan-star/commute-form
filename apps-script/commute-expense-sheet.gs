@@ -604,6 +604,8 @@ function doPost(e) {
 
     if (action === 'getStaffList') {
       data = Object.keys(CONFIG.STAFF_HOME);
+    } else if (action === 'getInitialData') {
+      data = getInitialData(req.staffName);
     } else if (action === 'getMonthInfo') {
       data = getMonthInfoWeb(req.staffName);
     } else if (action === 'getPlaceList') {
@@ -665,25 +667,39 @@ function getIrregularRowRange() {
   return { irregStart: irregStart, irregEnd: irregEnd };
 }
 
+// ── 起動時に必要な情報をまとめて返す ─────────────────────────
+// 月情報と場所一覧を別々のリクエストで取ると、GASの実行が2本並行して走り
+// 初回読み込みがタイムアウトしやすい。1回の呼び出しにまとめる。
+function getInitialData(staffName) {
+  return {
+    monthInfo: getMonthInfoWeb(staffName),
+    placeList: getPlaceListWeb()
+  };
+}
+
 // ── 月情報＋入力済みの日を返す（フォーム表示用） ─────────────
 function getMonthInfoWeb(staffName) {
   var sheet = getCommuteSheet(staffName);
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
   var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
   var C = CONFIG.COL;
+  var range = getIrregularRowRange();
+
+  // C列（通常31日分＋イレギュラー枠）を1回でまとめて読む。
+  // 1セルずつ getValue() すると往復が数十回発生し、初回読み込みが
+  // タイムアウトする原因になる。
+  var firstRow  = CONFIG.dataStartRow;
+  var rowCount  = range.irregEnd - firstRow + 1;
+  var placeCol  = sheet.getRange(firstRow, C.PLACE, rowCount, 1).getValues();
 
   var filledDays = [];
   for (var d = 1; d <= daysInMonth; d++) {
-    var row = CONFIG.dataStartRow + d - 1;
-    var place = sheet.getRange(row, C.PLACE).getValue();
-    if (place) filledDays.push(d);
+    if (placeCol[d - 1][0]) filledDays.push(d);
   }
 
-  var range = getIrregularRowRange();
   var irregularCount = 0;
   for (var r = range.irregStart; r <= range.irregEnd; r++) {
-    var content = sheet.getRange(r, C.PLACE).getValue();
-    if (content) irregularCount++;
+    if (placeCol[r - firstRow][0]) irregularCount++;
   }
 
   return {
@@ -894,36 +910,41 @@ function getMyEntries(staffName) {
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
   var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
 
+  var range    = getIrregularRowRange();
+  var firstRow = CONFIG.dataStartRow;
+  var rowCount = range.irregEnd - firstRow + 1;
+
+  // A〜K列を1回でまとめて読む。1セルずつ getValue() すると
+  // 1行あたり5〜6回、31行で150回以上の往復になり非常に遅い。
+  var values = sheet.getRange(firstRow, 1, rowCount, 11).getValues();
+
   var results = [];
 
   for (var d = 1; d <= daysInMonth; d++) {
-    var row = CONFIG.dataStartRow + d - 1;
-    var place = sheet.getRange(row, C.PLACE).getValue();
-    if (!place) continue;
+    var v = values[d - 1];
+    if (!v[C.PLACE - 1]) continue;
     results.push({
       type: 'normal',
       day: d,
-      place: place,
-      highway: sheet.getRange(row, C.HIGHWAY).getValue(),
-      tollGo: sheet.getRange(row, C.TOLL_GO).getValue(),
-      tollBack: sheet.getRange(row, C.TOLL_BACK).getValue(),
-      amount: sheet.getRange(row, C.TOTAL_AMT).getValue(),
-      row: row
+      place: v[C.PLACE - 1],
+      highway: v[C.HIGHWAY - 1],
+      tollGo: v[C.TOLL_GO - 1],
+      tollBack: v[C.TOLL_BACK - 1],
+      amount: v[C.TOTAL_AMT - 1],
+      row: firstRow + d - 1
     });
   }
 
-  var range = getIrregularRowRange();
   for (var r = range.irregStart; r <= range.irregEnd; r++) {
-    var content = sheet.getRange(r, C.PLACE).getValue();
-    if (!content) continue;
-    var dateVal = sheet.getRange(r, 1).getValue();
-    var day = (dateVal instanceof Date) ? dateVal.getDate() : null;
+    var iv = values[r - firstRow];
+    if (!iv[C.PLACE - 1]) continue;
+    var dateVal = iv[C.DATE - 1];
     results.push({
       type: 'irregular',
-      day: day,
-      content: content,
-      amount: sheet.getRange(r, C.TOTAL_AMT).getValue(),
-      note: sheet.getRange(r, C.NOTE).getValue(),
+      day: (dateVal instanceof Date) ? dateVal.getDate() : null,
+      content: iv[C.PLACE - 1],
+      amount: iv[C.TOTAL_AMT - 1],
+      note: iv[C.NOTE - 1],
       row: r
     });
   }

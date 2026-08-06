@@ -297,7 +297,8 @@
   var calYearIrreg, calMonthIrreg, dayIrreg = null;
 
   function callApi(action, params, timeoutMs) {
-    timeoutMs = timeoutMs || 15000;
+    // GASはコールドスタートで数秒かかることがあるため、既定を長めに取る。
+    timeoutMs = timeoutMs || 30000;
     var body = Object.assign({ action: action }, params || {});
     return new Promise(function(resolve, reject) {
       var timedOut = false;
@@ -490,12 +491,11 @@
     document.getElementById('main-app').style.display = 'block';
     document.getElementById('topbar-name').textContent = currentStaff;
 
-    Promise.all([
-      callApi('getMonthInfo', { staffName: currentStaff }),
-      callApi('getPlaceList')
-    ]).then(function(results) {
-      monthInfo = results[0];
-      placeList = results[1];
+    // 月情報と場所一覧は1リクエストにまとめる。別々に投げるとGASの実行が
+    // 2本並行して走り、初回読み込みがタイムアウトしやすい。
+    callApi('getInitialData', { staffName: currentStaff }, 40000).then(function(res) {
+      monthInfo = res.monthInfo;
+      placeList = res.placeList;
       document.getElementById('topbar-month').textContent = monthInfo.year + '年' + monthInfo.month + '月';
       document.getElementById('irreg-capacity').textContent = '枠: ' + monthInfo.irregularCount + '/' + monthInfo.irregularCapacity;
 
