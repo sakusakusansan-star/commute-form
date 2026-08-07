@@ -65,6 +65,14 @@ const CONFIG = {
 
   PLACE_SHEET: '稼働場所',  // 場所マスタシート名
 
+  // PDF出力設定
+  PDF: {
+    size: 'A4',
+    portrait: false,  // false = 横向き
+    scale: 4,         // 1:100% / 2:幅に合わせる / 3:高さに合わせる / 4:1ページに収める
+    margin: 0.25,     // 余白（インチ）。小さいほど本文を大きく印刷できる
+  },
+
   EDIT_TRIGGER_HANDLER: 'handleEdit', // インストール型onEditトリガーのハンドラ名
   ROUTE_CACHE_SEC: 21600,             // 同一経路の距離キャッシュ保持時間（秒・最大6時間）
 };
@@ -1033,15 +1041,45 @@ function exportCommutePdf(staffName) {
 }
 
 function exportCommuteSheetAsPdf(ss, sheet) {
+  var P = CONFIG.PDF;
+
+  // 出力範囲を合計行・K列までに限定する。範囲を指定せずシート全体を対象にすると、
+  // 右側・下側の未使用セルまで含めて1ページに押し込もうとして文字が極端に小さくなる。
+  // r1/c1 は0始まりの開始位置、r2/c2 は終了行・終了列（1始まりの番号）。
+  var lastRow = getIrregularRowRange().irregEnd + 1;  // 合計行
+  var lastCol = 11;                                   // K列
+
+  var params = {
+    exportFormat: 'pdf',
+    format: 'pdf',
+    gid: sheet.getSheetId(),
+    size: P.size,
+    portrait: P.portrait ? 'true' : 'false',
+    scale: P.scale,          // 4 = 1ページに収める
+    r1: 0,
+    c1: 0,
+    r2: lastRow,
+    c2: lastCol,
+    top_margin: P.margin,
+    bottom_margin: P.margin,
+    left_margin: P.margin,
+    right_margin: P.margin,
+    horizontal_alignment: 'CENTER',
+    vertical_alignment: 'TOP',
+    sheetnames: 'false',
+    printtitle: 'false',
+    pagenumbers: 'false',
+    gridlines: 'false',
+    fzr: 'false'
+  };
+
   // ss.getUrl() は末尾が "/edit" とは限らず（#gid=... が付く等）、
   // replace(/edit$/, "") だと ".../editexport" のような壊れたURLになり、
   // PDFではなくHTMLのエラーページを保存してしまう。IDから組み立てる方が確実。
-  var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export'
-    + '?exportFormat=pdf&format=pdf'
-    + '&gid=' + sheet.getSheetId()
-    + '&size=A4&portrait=false&fitw=true'
-    + '&sheetnames=false&printtitle=false&pagenumbers=false'
-    + '&gridlines=false&fzr=false';
+  var query = Object.keys(params).map(function(k) {
+    return k + '=' + encodeURIComponent(params[k]);
+  }).join('&');
+  var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?' + query;
 
   var response = UrlFetchApp.fetch(exportUrl, {
     headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
