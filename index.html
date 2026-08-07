@@ -104,6 +104,7 @@
   .empty-msg { text-align: center; color: #9CA3AF; font-size: 14px; padding: 30px 0; }
 
   .btn-pdf { width: 100%; padding: 16px; background: linear-gradient(135deg, #2D5F8A, #1B2A4A); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: bold; margin-top: 4px; }
+  .btn-pdf-all { background: linear-gradient(135deg, #4A5865, #26323D); margin-top: 8px; }
 
   .place-item { background: #F9FAFB; border-radius: 10px; padding: 12px; margin-bottom: 8px; }
   .place-item input { margin-bottom: 8px; }
@@ -259,8 +260,9 @@
     <div class="card">
       <div class="card-label">📄 PDF保存</div>
       <p style="font-size:13px;color:#6B7280;margin-bottom:12px;">今月の稼働費シートをPDFにしてGoogle Driveへ保存します。</p>
-      <button class="btn-pdf" onclick="exportPdf()">📄 PDFをGoogle Driveへ保存</button>
-      <div id="pdf-result" style="margin-top:10px;font-size:13px;text-align:center;"></div>
+      <button class="btn-pdf" onclick="exportPdf()">📄 自分の分を保存</button>
+      <button class="btn-pdf btn-pdf-all" onclick="exportPdfAll()">👥 全員分をまとめて保存</button>
+      <div id="pdf-result" style="margin-top:10px;font-size:13px;text-align:center;white-space:pre-line;"></div>
     </div>
 
     <div class="card">
@@ -840,6 +842,20 @@
     var el = document.getElementById('pdf-result');
     el.style.color = '#6B7280'; el.textContent = '保存中...';
     callApi('exportPdf', { staffName: currentStaff }, 60000).then(function(msg) {
+      el.style.color = '#15803D';
+      el.textContent = '✅ ' + msg;
+    }).catch(function(err) {
+      el.style.color = '#DC2626';
+      el.textContent = '❌ ' + err.message;
+    });
+  }
+
+  // 全スタッフ分をまとめて保存。人数分の書き出しが直列で走るので待ち時間を長めに取る。
+  function exportPdfAll() {
+    if (!confirm('全スタッフ分の稼働費シートをPDFにして保存します。よろしいですか？')) return;
+    var el = document.getElementById('pdf-result');
+    el.style.color = '#6B7280'; el.textContent = '全員分を保存中...';
+    callApi('exportPdfAll', {}, 180000).then(function(msg) {
       el.style.color = '#15803D';
       el.textContent = '✅ ' + msg;
     }).catch(function(err) {

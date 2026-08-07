@@ -97,6 +97,8 @@ function onOpen() {
     .addItem('⚙️ 初期設定（初回のみ）', 'initialSetup')
     .addItem('🔌 自動計算トリガーを再設定', 'installEditTriggerFromMenu')
     .addSeparator()
+    .addItem('📄 全員分のPDFを保存', 'exportAllPdfFromMenu')
+    .addSeparator()
     .addItem('🩺 Drive権限をチェック', 'checkDriveAccess')
     .addItem('🩺 PDF保存をテスト', 'testExportPdf')
     .addToUi();
@@ -638,6 +640,8 @@ function doPost(e) {
       data = deleteIrregularEntry(req.staffName, req.row);
     } else if (action === 'resetMonth') {
       data = resetMonthWeb(req.staffName, req.month);
+    } else if (action === 'exportPdfAll') {
+      data = exportAllCommutePdf();
     } else if (action === 'exportPdf') {
       data = exportCommutePdf(req.staffName);
     } else {
@@ -1038,6 +1042,34 @@ function exportCommutePdf(staffName) {
   targetFolder.createFile(pdfBlob);
 
   return '保存完了';
+}
+
+// ── 全スタッフ分のPDFをまとめて保存 ─────────────────────────
+// 1人分が失敗しても中断せず残りを続け、最後にまとめて結果を返す。
+// 月は各スタッフシートのG2をそれぞれ参照するので、人によって対象月が
+// 違っていてもそのまま処理できる。
+function exportAllCommutePdf() {
+  var names = Object.keys(CONFIG.STAFF_HOME);
+  var ok = [];
+  var ng = [];
+
+  names.forEach(function(name) {
+    try {
+      exportCommutePdf(name);
+      ok.push(name);
+    } catch (err) {
+      ng.push(name + '（' + err.message + '）');
+    }
+  });
+
+  var msg = ok.length + '/' + names.length + '件を保存しました';
+  if (ok.length) msg += '\n保存: ' + ok.join('、');
+  if (ng.length) msg += '\n失敗: ' + ng.join('、');
+  return msg;
+}
+
+function exportAllPdfFromMenu() {
+  return report_(exportAllCommutePdf());
 }
 
 function exportCommuteSheetAsPdf(ss, sheet) {
