@@ -377,10 +377,15 @@ function handleEdit(e) {
 }
 
 // ── 1行分の距離を取得・セット ────────────────────────────────
-function updateRowDistance(sheet, staffName, row) {
-  const C          = CONFIG.COL;
-  const placeShort = sheet.getRange(row, C.PLACE).getValue();
-  const highway    = sheet.getRange(row, C.HIGHWAY).getValue();
+// placeMap は呼び出し側から渡せる。複数日をまとめて処理する時に
+// 1行ごとに「稼働場所」シート全体を読み直すと、日数分だけ往復が増えて
+// 送信が極端に遅くなるため。
+function updateRowDistance(sheet, staffName, row, placeMap) {
+  const C = CONFIG.COL;
+  // C列（場所）とI列（高速有無）を1回でまとめて読む
+  const rowVals    = sheet.getRange(row, C.PLACE, 1, C.HIGHWAY - C.PLACE + 1).getValues()[0];
+  const placeShort = rowVals[0];
+  const highway    = rowVals[C.HIGHWAY - C.PLACE];
 
   if (!placeShort) {
     sheet.getRange(row, C.DIST_GO, 1, 3).clearContent();
@@ -388,8 +393,9 @@ function updateRowDistance(sheet, staffName, row) {
     return;
   }
 
-  const ss       = SpreadsheetApp.getActiveSpreadsheet();
-  const placeMap = getPlaceMap(ss);
+  if (!placeMap) {
+    placeMap = getPlaceMap(SpreadsheetApp.getActiveSpreadsheet());
+  }
 
   const homeShort = CONFIG.STAFF_HOME[staffName];
   const homeAddr  = placeMap[homeShort];
@@ -412,10 +418,13 @@ function updateRowDistance(sheet, staffName, row) {
     const distGo   = getRouteDistanceKm(homeAddr, destAddr, routeType);
     const distBack = getRouteDistanceKm(destAddr, homeAddr, routeType);
 
-    sheet.getRange(row, C.DIST_GO).setValue(distGo).setNumberFormat('#,##0.000');
-    sheet.getRange(row, C.DIST_BACK).setValue(distBack).setNumberFormat('#,##0.000');
-    sheet.getRange(row, C.DIST_TOTAL)
-      .setFormula(`=IF(AND(ISNUMBER(D${row}),ISNUMBER(E${row})),D${row}+E${row},"")`)
+    // D・E・F はまとめて1回で書く（"=" で始まる文字列は数式として入る）
+    sheet.getRange(row, C.DIST_GO, 1, 3)
+      .setValues([[
+        distGo,
+        distBack,
+        `=IF(AND(ISNUMBER(D${row}),ISNUMBER(E${row})),D${row}+E${row},"")`
+      ]])
       .setNumberFormat('#,##0.000');
     clearDistanceNote(sheet, row);
     setTotalFormula(sheet, row);
@@ -475,13 +484,16 @@ function refreshAllDistances() {
   const startRow    = CONFIG.dataStartRow;
   const C = CONFIG.COL;
 
+  // 場所マスタとC列は1回ずつまとめて読む
+  const placeMap = getPlaceMap(ss);
+  const placeCol = sheet.getRange(startRow, C.PLACE, daysInMonth, 1).getValues();
+
   let updated = 0;
   for (let day = 1; day <= daysInMonth; day++) {
-    const row        = startRow + day - 1;
-    const placeShort = sheet.getRange(row, C.PLACE).getValue();
-    if (!placeShort) continue;
+    const row = startRow + day - 1;
+    if (!placeCol[day - 1][0]) continue;
 
-    updateRowDistance(sheet, name, row);
+    updateRowDistance(sheet, name, row, placeMap);
     updated++;
 
     // API レート制限対策（キャッシュヒット時はmapQuery自体が呼ばれないので実質スキップされる）
@@ -864,20 +876,21 @@ function submitCommute(staffName, data) {
   var endDay = Number(data.endDay) || startDay;
   if (endDay < startDay) { var tmp = startDay; startDay = endDay; endDay = tmp; }
 
+  // 場所マスタは範囲全体で1回だけ読む。日ごとに読み直すと
+  // 連続勤務をまとめて送った時に往復が日数分だけ増える。
+  var placeMap = getPlaceMap(SpreadsheetApp.getActiveSpreadsheet());
+  var isHighway = (data.highway === '有');
+  var tollGo    = isHighway && data.tollGo   ? Number(data.tollGo)   : '';
+  var tollBack  = isHighway && data.tollBack ? Number(data.tollBack) : '';
+
   for (var day = startDay; day <= endDay; day++) {
     var row = CONFIG.dataStartRow + day - 1;
     sheet.getRange(row, C.PLACE).setValue(data.place);
-    sheet.getRange(row, C.HIGHWAY).setValue(data.highway === '有' ? '有' : '無');
+    sheet.getRange(row, C.HIGHWAY).setValue(isHighway ? '有' : '無');
+    // G・H は隣り合っているのでまとめて1回で書く
+    sheet.getRange(row, C.TOLL_GO, 1, 2).setValues([[tollGo, tollBack]]);
 
-    if (data.highway === '有') {
-      sheet.getRange(row, C.TOLL_GO).setValue(data.tollGo ? Number(data.tollGo) : '');
-      sheet.getRange(row, C.TOLL_BACK).setValue(data.tollBack ? Number(data.tollBack) : '');
-    } else {
-      sheet.getRange(row, C.TOLL_GO).clearContent();
-      sheet.getRange(row, C.TOLL_BACK).clearContent();
-    }
-
-    updateRowDistance(sheet, staffName, row);
+    updateRowDistance(sheet, staffName, row, placeMap);
   }
 
   return { updatedDays: endDay - startDay + 1 };
