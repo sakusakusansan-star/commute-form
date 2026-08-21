@@ -65,6 +65,14 @@ const CONFIG = {
 
   PLACE_SHEET: '稼働場所',  // 場所マスタシート名
 
+  // PDF出力設定
+  PDF: {
+    size: 'A4',
+    portrait: false,  // false = 横向き
+    scale: 4,         // 1:100% / 2:幅に合わせる / 3:高さに合わせる / 4:1ページに収める
+    margin: 0.25,     // 余白（インチ）。小さいほど本文を大きく印刷できる
+  },
+
   EDIT_TRIGGER_HANDLER: 'handleEdit', // インストール型onEditトリガーのハンドラ名
   ROUTE_CACHE_SEC: 21600,             // 同一経路の距離キャッシュ保持時間（秒・最大6時間）
 };
@@ -369,10 +377,15 @@ function handleEdit(e) {
 }
 
 // ── 1行分の距離を取得・セット ────────────────────────────────
-function updateRowDistance(sheet, staffName, row) {
-  const C          = CONFIG.COL;
-  const placeShort = sheet.getRange(row, C.PLACE).getValue();
-  const highway    = sheet.getRange(row, C.HIGHWAY).getValue();
+// placeMap は呼び出し側から渡せる。複数日をまとめて処理する時に
+// 1行ごとに「稼働場所」シート全体を読み直すと、日数分だけ往復が増えて
+// 送信が極端に遅くなるため。
+function updateRowDistance(sheet, staffName, row, placeMap) {
+  const C = CONFIG.COL;
+  // C列（場所）とI列（高速有無）を1回でまとめて読む
+  const rowVals    = sheet.getRange(row, C.PLACE, 1, C.HIGHWAY - C.PLACE + 1).getValues()[0];
+  const placeShort = rowVals[0];
+  const highway    = rowVals[C.HIGHWAY - C.PLACE];
 
   if (!placeShort) {
     sheet.getRange(row, C.DIST_GO, 1, 3).clearContent();
@@ -380,8 +393,9 @@ function updateRowDistance(sheet, staffName, row) {
     return;
   }
 
-  const ss       = SpreadsheetApp.getActiveSpreadsheet();
-  const placeMap = getPlaceMap(ss);
+  if (!placeMap) {
+    placeMap = getPlaceMap(SpreadsheetApp.getActiveSpreadsheet());
+  }
 
   const homeShort = CONFIG.STAFF_HOME[staffName];
   const homeAddr  = placeMap[homeShort];
@@ -404,10 +418,13 @@ function updateRowDistance(sheet, staffName, row) {
     const distGo   = getRouteDistanceKm(homeAddr, destAddr, routeType);
     const distBack = getRouteDistanceKm(destAddr, homeAddr, routeType);
 
-    sheet.getRange(row, C.DIST_GO).setValue(distGo).setNumberFormat('#,##0.000');
-    sheet.getRange(row, C.DIST_BACK).setValue(distBack).setNumberFormat('#,##0.000');
-    sheet.getRange(row, C.DIST_TOTAL)
-      .setFormula(`=IF(AND(ISNUMBER(D${row}),ISNUMBER(E${row})),D${row}+E${row},"")`)
+    // D・E・F はまとめて1回で書く（"=" で始まる文字列は数式として入る）
+    sheet.getRange(row, C.DIST_GO, 1, 3)
+      .setValues([[
+        distGo,
+        distBack,
+        `=IF(AND(ISNUMBER(D${row}),ISNUMBER(E${row})),D${row}+E${row},"")`
+      ]])
       .setNumberFormat('#,##0.000');
     clearDistanceNote(sheet, row);
     setTotalFormula(sheet, row);
@@ -467,13 +484,16 @@ function refreshAllDistances() {
   const startRow    = CONFIG.dataStartRow;
   const C = CONFIG.COL;
 
+  // 場所マスタとC列は1回ずつまとめて読む
+  const placeMap = getPlaceMap(ss);
+  const placeCol = sheet.getRange(startRow, C.PLACE, daysInMonth, 1).getValues();
+
   let updated = 0;
   for (let day = 1; day <= daysInMonth; day++) {
-    const row        = startRow + day - 1;
-    const placeShort = sheet.getRange(row, C.PLACE).getValue();
-    if (!placeShort) continue;
+    const row = startRow + day - 1;
+    if (!placeCol[day - 1][0]) continue;
 
-    updateRowDistance(sheet, name, row);
+    updateRowDistance(sheet, name, row, placeMap);
     updated++;
 
     // API レート制限対策（キャッシュヒット時はmapQuery自体が呼ばれないので実質スキップされる）
@@ -604,6 +624,8 @@ function doPost(e) {
 
     if (action === 'getStaffList') {
       data = Object.keys(CONFIG.STAFF_HOME);
+    } else if (action === 'getInitialData') {
+      data = getInitialData(req.staffName);
     } else if (action === 'getMonthInfo') {
       data = getMonthInfoWeb(req.staffName);
     } else if (action === 'getPlaceList') {
@@ -665,25 +687,39 @@ function getIrregularRowRange() {
   return { irregStart: irregStart, irregEnd: irregEnd };
 }
 
+// ── 起動時に必要な情報をまとめて返す ─────────────────────────
+// 月情報と場所一覧を別々のリクエストで取ると、GASの実行が2本並行して走り
+// 初回読み込みがタイムアウトしやすい。1回の呼び出しにまとめる。
+function getInitialData(staffName) {
+  return {
+    monthInfo: getMonthInfoWeb(staffName),
+    placeList: getPlaceListWeb()
+  };
+}
+
 // ── 月情報＋入力済みの日を返す（フォーム表示用） ─────────────
 function getMonthInfoWeb(staffName) {
   var sheet = getCommuteSheet(staffName);
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
   var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
   var C = CONFIG.COL;
+  var range = getIrregularRowRange();
+
+  // C列（通常31日分＋イレギュラー枠）を1回でまとめて読む。
+  // 1セルずつ getValue() すると往復が数十回発生し、初回読み込みが
+  // タイムアウトする原因になる。
+  var firstRow  = CONFIG.dataStartRow;
+  var rowCount  = range.irregEnd - firstRow + 1;
+  var placeCol  = sheet.getRange(firstRow, C.PLACE, rowCount, 1).getValues();
 
   var filledDays = [];
   for (var d = 1; d <= daysInMonth; d++) {
-    var row = CONFIG.dataStartRow + d - 1;
-    var place = sheet.getRange(row, C.PLACE).getValue();
-    if (place) filledDays.push(d);
+    if (placeCol[d - 1][0]) filledDays.push(d);
   }
 
-  var range = getIrregularRowRange();
   var irregularCount = 0;
   for (var r = range.irregStart; r <= range.irregEnd; r++) {
-    var content = sheet.getRange(r, C.PLACE).getValue();
-    if (content) irregularCount++;
+    if (placeCol[r - firstRow][0]) irregularCount++;
   }
 
   return {
@@ -840,20 +876,21 @@ function submitCommute(staffName, data) {
   var endDay = Number(data.endDay) || startDay;
   if (endDay < startDay) { var tmp = startDay; startDay = endDay; endDay = tmp; }
 
+  // 場所マスタは範囲全体で1回だけ読む。日ごとに読み直すと
+  // 連続勤務をまとめて送った時に往復が日数分だけ増える。
+  var placeMap = getPlaceMap(SpreadsheetApp.getActiveSpreadsheet());
+  var isHighway = (data.highway === '有');
+  var tollGo    = isHighway && data.tollGo   ? Number(data.tollGo)   : '';
+  var tollBack  = isHighway && data.tollBack ? Number(data.tollBack) : '';
+
   for (var day = startDay; day <= endDay; day++) {
     var row = CONFIG.dataStartRow + day - 1;
     sheet.getRange(row, C.PLACE).setValue(data.place);
-    sheet.getRange(row, C.HIGHWAY).setValue(data.highway === '有' ? '有' : '無');
+    sheet.getRange(row, C.HIGHWAY).setValue(isHighway ? '有' : '無');
+    // G・H は隣り合っているのでまとめて1回で書く
+    sheet.getRange(row, C.TOLL_GO, 1, 2).setValues([[tollGo, tollBack]]);
 
-    if (data.highway === '有') {
-      sheet.getRange(row, C.TOLL_GO).setValue(data.tollGo ? Number(data.tollGo) : '');
-      sheet.getRange(row, C.TOLL_BACK).setValue(data.tollBack ? Number(data.tollBack) : '');
-    } else {
-      sheet.getRange(row, C.TOLL_GO).clearContent();
-      sheet.getRange(row, C.TOLL_BACK).clearContent();
-    }
-
-    updateRowDistance(sheet, staffName, row);
+    updateRowDistance(sheet, staffName, row, placeMap);
   }
 
   return { updatedDays: endDay - startDay + 1 };
@@ -894,36 +931,41 @@ function getMyEntries(staffName) {
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
   var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
 
+  var range    = getIrregularRowRange();
+  var firstRow = CONFIG.dataStartRow;
+  var rowCount = range.irregEnd - firstRow + 1;
+
+  // A〜K列を1回でまとめて読む。1セルずつ getValue() すると
+  // 1行あたり5〜6回、31行で150回以上の往復になり非常に遅い。
+  var values = sheet.getRange(firstRow, 1, rowCount, 11).getValues();
+
   var results = [];
 
   for (var d = 1; d <= daysInMonth; d++) {
-    var row = CONFIG.dataStartRow + d - 1;
-    var place = sheet.getRange(row, C.PLACE).getValue();
-    if (!place) continue;
+    var v = values[d - 1];
+    if (!v[C.PLACE - 1]) continue;
     results.push({
       type: 'normal',
       day: d,
-      place: place,
-      highway: sheet.getRange(row, C.HIGHWAY).getValue(),
-      tollGo: sheet.getRange(row, C.TOLL_GO).getValue(),
-      tollBack: sheet.getRange(row, C.TOLL_BACK).getValue(),
-      amount: sheet.getRange(row, C.TOTAL_AMT).getValue(),
-      row: row
+      place: v[C.PLACE - 1],
+      highway: v[C.HIGHWAY - 1],
+      tollGo: v[C.TOLL_GO - 1],
+      tollBack: v[C.TOLL_BACK - 1],
+      amount: v[C.TOTAL_AMT - 1],
+      row: firstRow + d - 1
     });
   }
 
-  var range = getIrregularRowRange();
   for (var r = range.irregStart; r <= range.irregEnd; r++) {
-    var content = sheet.getRange(r, C.PLACE).getValue();
-    if (!content) continue;
-    var dateVal = sheet.getRange(r, 1).getValue();
-    var day = (dateVal instanceof Date) ? dateVal.getDate() : null;
+    var iv = values[r - firstRow];
+    if (!iv[C.PLACE - 1]) continue;
+    var dateVal = iv[C.DATE - 1];
     results.push({
       type: 'irregular',
-      day: day,
-      content: content,
-      amount: sheet.getRange(r, C.TOTAL_AMT).getValue(),
-      note: sheet.getRange(r, C.NOTE).getValue(),
+      day: (dateVal instanceof Date) ? dateVal.getDate() : null,
+      content: iv[C.PLACE - 1],
+      amount: iv[C.TOTAL_AMT - 1],
+      note: iv[C.NOTE - 1],
       row: r
     });
   }
@@ -1012,15 +1054,45 @@ function exportCommutePdf(staffName) {
 }
 
 function exportCommuteSheetAsPdf(ss, sheet) {
+  var P = CONFIG.PDF;
+
+  // 出力範囲を合計行・K列までに限定する。範囲を指定せずシート全体を対象にすると、
+  // 右側・下側の未使用セルまで含めて1ページに押し込もうとして文字が極端に小さくなる。
+  // r1/c1 は0始まりの開始位置、r2/c2 は終了行・終了列（1始まりの番号）。
+  var lastRow = getIrregularRowRange().irregEnd + 1;  // 合計行
+  var lastCol = 11;                                   // K列
+
+  var params = {
+    exportFormat: 'pdf',
+    format: 'pdf',
+    gid: sheet.getSheetId(),
+    size: P.size,
+    portrait: P.portrait ? 'true' : 'false',
+    scale: P.scale,          // 4 = 1ページに収める
+    r1: 0,
+    c1: 0,
+    r2: lastRow,
+    c2: lastCol,
+    top_margin: P.margin,
+    bottom_margin: P.margin,
+    left_margin: P.margin,
+    right_margin: P.margin,
+    horizontal_alignment: 'CENTER',
+    vertical_alignment: 'TOP',
+    sheetnames: 'false',
+    printtitle: 'false',
+    pagenumbers: 'false',
+    gridlines: 'false',
+    fzr: 'false'
+  };
+
   // ss.getUrl() は末尾が "/edit" とは限らず（#gid=... が付く等）、
   // replace(/edit$/, "") だと ".../editexport" のような壊れたURLになり、
   // PDFではなくHTMLのエラーページを保存してしまう。IDから組み立てる方が確実。
-  var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export'
-    + '?exportFormat=pdf&format=pdf'
-    + '&gid=' + sheet.getSheetId()
-    + '&size=A4&portrait=false&fitw=true'
-    + '&sheetnames=false&printtitle=false&pagenumbers=false'
-    + '&gridlines=false&fzr=false';
+  var query = Object.keys(params).map(function(k) {
+    return k + '=' + encodeURIComponent(params[k]);
+  }).join('&');
+  var exportUrl = 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/export?' + query;
 
   var response = UrlFetchApp.fetch(exportUrl, {
     headers: { 'Authorization': 'Bearer ' + ScriptApp.getOAuthToken() },
