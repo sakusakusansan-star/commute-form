@@ -283,7 +283,17 @@
 </div>
 
 <script>
-  var GAS_URL = "https://script.google.com/macros/s/AKfycbxp1cYnzgOMh4_ud5cEPJ7_b6qNFIm0YKt-sjFtBwXfeEHy_hMiZD0q2bPh-3vVOO15fA/exec";
+  // 福山・古川・清田は同じスプレッドシート（1つのGASデプロイ）に同居しているが、
+  // 山口さんは現場が別エリアのため専用スプレッドシート・専用デプロイを使う。
+  // スタッフ名ごとに送信先を振り分け、無ければ既定（3人共通）に送る。
+  var GAS_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbxp1cYnzgOMh4_ud5cEPJ7_b6qNFIm0YKt-sjFtBwXfeEHy_hMiZD0q2bPh-3vVOO15fA/exec";
+  var GAS_URLS = {
+    '山口真人': 'https://script.google.com/macros/s/AKfycbwwALmDLzKteasiO0AMqAyRWsfb3p_AqgjkLZo-IBSctLDseudhes9hxJer7aGsdDkj/exec'
+  };
+  function gasUrlFor(staffName) {
+    var url = staffName && GAS_URLS[staffName];
+    return url || GAS_URL_DEFAULT;
+  }
 
   var STAFF_KEY = 'commuteStaffName';
   var currentStaff = null;
@@ -306,7 +316,7 @@
         timedOut = true;
         reject(new Error('通信がタイムアウトしました（' + (timeoutMs/1000) + '秒）。'));
       }, timeoutMs);
-      fetch(GAS_URL, { method: 'POST', body: JSON.stringify(body) })
+      fetch(gasUrlFor(currentStaff), { method: 'POST', body: JSON.stringify(body) })
         // JSON決め打ちで読むと、GASがHTML（ログイン画面や権限エラー画面）を
         // 返した時に「Unexpected token '<'」としか分からないため、
         // 一旦テキストで受けてから自前でJSONに変換する。
@@ -374,7 +384,8 @@
   var STAFF_ALIASES = {
     '福山': '福山康平',
     '古川': '古川泰成',
-    '清田': '清田和男'
+    '清田': '清田和男',
+    '山口': '山口真人'
   };
 
   // 通信を待たずにその場で正式名へ変換（表記ゆれ・空白は無視）
