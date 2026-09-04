@@ -288,8 +288,7 @@
   // スタッフ名ごとに送信先を振り分け、無ければ既定（3人共通）に送る。
   var GAS_URL_DEFAULT = "https://script.google.com/macros/s/AKfycbxp1cYnzgOMh4_ud5cEPJ7_b6qNFIm0YKt-sjFtBwXfeEHy_hMiZD0q2bPh-3vVOO15fA/exec";
   var GAS_URLS = {
-    // 山口さん専用デプロイの /exec URL。まだ未デプロイのため未設定（既定へフォールバック）。
-    '山口真人': ''
+    '山口真人': 'https://script.google.com/macros/s/AKfycbwwALmDLzKteasiO0AMqAyRWsfb3p_AqgjkLZo-IBSctLDseudhes9hxJer7aGsdDkj/exec'
   };
   function gasUrlFor(staffName) {
     var url = staffName && GAS_URLS[staffName];
