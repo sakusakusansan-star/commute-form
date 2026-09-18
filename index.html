@@ -306,40 +306,108 @@
   var calYear, calMonth, startDay = null, endDay = null;
   var calYearIrreg, calMonthIrreg, dayIrreg = null;
 
+  // ── GASのWebアプリに付きまとう一時的な404について ──────────────
+  // POSTすると script.google.com がスクリプトを実行し、結果は
+  // script.googleusercontent.com/macros/echo へリダイレクトして返される。
+  // この2段目がGoogle側の都合で数回に1回404（ドライブの「ページが見つかりません」
+  // HTML）を返すことがあり、URLもデプロイも正常なのに読み込みが失敗する。
+  // すぐ投げ直せば通るので、やり直しても結果が変わらない操作だけ自動で再試行する。
+  var RETRY_SAFE_ACTIONS = {
+    // 読むだけ
+    getStaffList: true, getInitialData: true, getMonthInfo: true,
+    getPlaceList: true, getPlaceListManage: true, getMyEntries: true,
+    // 日付・行を指定して上書き／消去するだけなので、2回走っても結果は同じ
+    submitCommute: true, deleteNormalEntry: true, deleteIrregularEntry: true,
+    updatePlace: true, resetMonth: true
+    // submitIrregular（空き行へ追加）・addPlace（行を追加）・deletePlace（行が詰まる）・
+    // exportPdf（PDFが増える）は2回走ると結果が変わるため、ここには入れない。
+  };
+  var MAX_ATTEMPTS = 5;      // 初回 + 再試行4回（404は即座に返るので待ち時間は最大6秒ほど）
+  var RETRY_WAIT_MS = 600;
+
   function callApi(action, params, timeoutMs) {
     // GASはコールドスタートで数秒かかることがあるため、既定を長めに取る。
     timeoutMs = timeoutMs || 30000;
-    var body = Object.assign({ action: action }, params || {});
+    var body = JSON.stringify(Object.assign({ action: action }, params || {}));
+    var maxAttempts = RETRY_SAFE_ACTIONS[action] ? MAX_ATTEMPTS : 1;
+
+    function attempt(n) {
+      return requestOnce(body, timeoutMs).catch(function(err) {
+        if (err.transient && n < maxAttempts) {
+          return wait(RETRY_WAIT_MS * n).then(function() { return attempt(n + 1); });
+        }
+        throw new Error(finalErrorMessage(err, action, n));
+      });
+    }
+    return attempt(1);
+  }
+
+  function wait(ms) {
+    return new Promise(function(resolve) { setTimeout(resolve, ms); });
+  }
+
+  // 一時的な失敗（transient=true）だけが再試行の対象。
+  function transientError(message) { return taggedError(message, true); }
+  function permanentError(message) { return taggedError(message, false); }
+  function taggedError(message, transient) {
+    var err = new Error(message);
+    err.transient = transient;
+    return err;
+  }
+
+  function requestOnce(body, timeoutMs) {
     return new Promise(function(resolve, reject) {
-      var timedOut = false;
+      var settled = false;
       var timer = setTimeout(function() {
-        timedOut = true;
-        reject(new Error('通信がタイムアウトしました（' + (timeoutMs/1000) + '秒）。'));
+        if (settled) return;
+        settled = true;
+        // タイムアウトを自動で投げ直しても待ち時間が積み上がるだけなので再試行しない。
+        reject(permanentError('通信がタイムアウトしました（' + (timeoutMs/1000) + '秒）。'));
       }, timeoutMs);
-      fetch(gasUrlFor(currentStaff), { method: 'POST', body: JSON.stringify(body) })
+      var status = 0, finalUrl = '';
+      fetch(gasUrlFor(currentStaff), { method: 'POST', body: body })
         // JSON決め打ちで読むと、GASがHTML（ログイン画面や権限エラー画面）を
         // 返した時に「Unexpected token '<'」としか分からないため、
         // 一旦テキストで受けてから自前でJSONに変換する。
-        .then(function(res) { return res.text(); })
+        .then(function(res) {
+          status = res.status;
+          finalUrl = res.url || '';
+          return res.text();
+        })
         .then(function(text) {
-          if (timedOut) return;
+          if (settled) return;
+          settled = true;
           clearTimeout(timer);
           var json;
           try {
             json = JSON.parse(text);
           } catch (parseErr) {
-            reject(new Error(describeNonJsonResponse(text)));
+            reject(describeNonJsonResponse(text, status, finalUrl));
             return;
           }
-          if (!json.ok) reject(new Error(json.error || '不明なエラー'));
+          if (!json.ok) reject(permanentError(json.error || '不明なエラー'));
           else resolve(json.data);
         })
         .catch(function(err) {
-          if (timedOut) return;
+          if (settled) return;
+          settled = true;
           clearTimeout(timer);
-          reject(new Error(describeFetchError(err)));
+          reject(permanentError(describeFetchError(err)));
         });
     });
+  }
+
+  // 再試行しても駄目だった時に画面へ出す文言。
+  // 一時的な404はスクリプト本体が動いた後で起きることがあるため、
+  // 再試行しない操作では「もう一度押す前に結果を確認して」と伝える。
+  function finalErrorMessage(err, action, attempts) {
+    if (!err.transient) return err.message;
+    if (RETRY_SAFE_ACTIONS[action]) {
+      return err.message + '自動で' + attempts + '回試しましたが復旧しませんでした。'
+        + '少し時間をおいて、もう一度お試しください。';
+    }
+    return err.message + 'この操作は自動でやり直すと二重に登録されるおそれがあるため、再試行していません。'
+      + 'サーバー側では処理が終わっている場合があるので、「確認・修正」タブで結果を確かめてから操作し直してください。';
   }
 
   // fetch自体が失敗した（サーバーの応答を受け取れなかった）ケースの説明。
@@ -357,33 +425,49 @@
     return '通信エラー: ' + msg;
   }
 
-  // GASがJSONではなくHTMLを返した時に、何が起きているか分かる文言に変換する。
+  // GASがJSONではなくHTMLを返した時に、何が起きているか分かるErrorへ変換する。
   // 「Unexpected token '<'」のままだと原因がデプロイ設定なのかコードなのか判別できないため。
-  function describeNonJsonResponse(text) {
+  function describeNonJsonResponse(text, status, finalUrl) {
     var t = String(text == null ? '' : text);
     if (/accounts\.google\.com|ServiceLogin|アカウントの選択|Choose an account|ログイン/i.test(t)) {
-      return 'Googleのログイン画面が返されました。GASの「デプロイを管理」→ アクセスできるユーザー を「全員」にして再デプロイしてください。';
+      return permanentError('Googleのログイン画面が返されました。GASの「デプロイを管理」→ アクセスできるユーザー を「全員」にして再デプロイしてください。');
     }
     if (/承認が必要|Authorization is required|requires authorization/i.test(t)) {
-      return 'GAS側の承認が未完了です。スクリプトエディタで関数を一度手動実行して権限を許可し、Webアプリを再デプロイしてください。';
+      return permanentError('GAS側の承認が未完了です。スクリプトエディタで関数を一度手動実行して権限を許可し、Webアプリを再デプロイしてください。');
     }
     if (/権限|permission|アクセスできません|Access denied/i.test(t)) {
-      return 'このGoogleアカウントにはWebアプリの実行権限がありません。デプロイ設定の「アクセスできるユーザー」を確認してください。';
+      return permanentError('このGoogleアカウントにはWebアプリの実行権限がありません。デプロイ設定の「アクセスできるユーザー」を確認してください。');
+    }
+    // 結果を受け取る script.googleusercontent.com 側が一時的に落ちているだけのケース。
+    // URLもデプロイも正しいので、「URLが古い」と案内してはいけない。
+    if (isTransientGoogleFailure(status, finalUrl, t)) {
+      return transientError('Google側の一時的なエラー（' + (status || '応答なし') + '）で結果を受け取れませんでした。');
     }
     // 「Script function not found: doPost」はURLの問題ではなく、デプロイ中の
     // バージョンが古くて doPost を含んでいない時に返る。URLを貼り替えても直らない
     // ので、URL切れ（ファイルが見つかりません）とは分けて案内する。
     if (/Script function not found/i.test(t)) {
-      return 'デプロイされているコードが古く、doPost が見つかりません。'
-        + 'Apps Scriptの「デプロイを管理」→ 対象デプロイの鉛筆（編集）→ バージョンを「新バージョン」にしてデプロイし直してください（URLは変わりません）。';
+      return permanentError('デプロイされているコードが古く、doPost が見つかりません。'
+        + 'Apps Scriptの「デプロイを管理」→ 対象デプロイの鉛筆（編集）→ バージョンを「新バージョン」にしてデプロイし直してください（URLは変わりません）。');
     }
     if (/見つかりません|not found|does not exist|存在しません/i.test(t)) {
-      return 'デプロイURLが見つかりません。最新のデプロイURL（末尾 /exec）をGAS_URLに設定してください。';
+      return permanentError('デプロイURLが見つかりません。最新のデプロイURL（末尾 /exec）をGAS_URLに設定してください。');
     }
     if (/^\s*</.test(t)) {
-      return 'サーバーがJSONではなくHTMLを返しました。デプロイ設定（アクセスできるユーザー＝全員／実行するユーザー＝自分）と、コード変更後の再デプロイを確認してください。';
+      return permanentError('サーバーがJSONではなくHTMLを返しました。デプロイ設定（アクセスできるユーザー＝全員／実行するユーザー＝自分）と、コード変更後の再デプロイを確認してください。');
     }
-    return 'サーバーの応答を解析できませんでした: ' + t.slice(0, 150);
+    return permanentError('サーバーの応答を解析できませんでした: ' + t.slice(0, 150));
+  }
+
+  // リダイレクト先（googleusercontent）が404/5xxを返した＝Google側の一時障害。
+  // デプロイURLが本当に切れている場合は script.google.com 側で止まり、
+  // 結果の受け取り口であるechoまで到達しないので、これで区別できる。
+  function isTransientGoogleFailure(status, finalUrl, text) {
+    if (status >= 500) return true;
+    var viaEcho = /googleusercontent\.com/.test(finalUrl || '');
+    if (status === 404 && viaEcho) return true;
+    if (viaEcho && /ファイルを開くことができません|unable to open the file|ページが見つかりません/i.test(text)) return true;
+    return false;
   }
 
   // ---- 苗字 → フルネームの即時変換テーブル ----

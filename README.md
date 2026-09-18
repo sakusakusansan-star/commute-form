@@ -40,6 +40,29 @@
   CORSでブロックされてこのエラーになる。
 - `index.html` の `GAS_URL` が、現在のデプロイURL（末尾 `/exec`）と一致しているか。
 
+### ❌「デプロイURLが見つかりません」が出たり出なかったりする
+
+**URLもデプロイも正常なのに出る**ことがある。GASのWebアプリにPOSTすると、
+`script.google.com` がスクリプトを実行したあと、結果は
+`script.googleusercontent.com/macros/echo` へリダイレクトして返す仕組みになっている。
+この2段目がGoogle側の都合で **数回に1回 404**（ドライブの「ページが見つかりません」HTML）
+を返すことがあり、同じURLに同じリクエストを投げても成否が割れる。
+
+確認方法（フォームのページを開いてコンソールで実行）:
+
+```js
+(async()=>{const u="＜GASのexec URL＞";for(let i=0;i<6;i++){const r=await fetch(u,{method:"POST",body:JSON.stringify({action:"getMonthInfo",staffName:"古川泰成"})});console.log(i,r.status,r.headers.get("content-type"));}})();
+```
+
+200と404が混ざるならこの症状。**URLの貼り替えも再デプロイも不要**。
+
+`index.html` 側では、リダイレクト先（googleusercontent）が返した404/5xxを
+「一時的な失敗」として扱い、**やり直しても結果が変わらない操作だけ**自動で再試行する
+（`RETRY_SAFE_ACTIONS`）。空き行に追加する `submitIrregular`、行を増減させる
+`addPlace` / `deletePlace`、ファイルが増える `exportPdf` は二重登録になるため再試行しない。
+これらで404を踏んだ場合は「確認・修正」タブで結果を確かめてから操作し直すこと
+（404はスクリプト本体が動いた**後**に起きるため、処理自体は完了していることがある）。
+
 ### ❌「Unexpected token '<' ... is not valid JSON」
 
 GASがJSONではなくHTML（ログイン画面・権限エラー画面）を返している。
