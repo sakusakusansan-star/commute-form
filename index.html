@@ -370,6 +370,13 @@
     if (/権限|permission|アクセスできません|Access denied/i.test(t)) {
       return 'このGoogleアカウントにはWebアプリの実行権限がありません。デプロイ設定の「アクセスできるユーザー」を確認してください。';
     }
+    // 「Script function not found: doPost」はURLの問題ではなく、デプロイ中の
+    // バージョンが古くて doPost を含んでいない時に返る。URLを貼り替えても直らない
+    // ので、URL切れ（ファイルが見つかりません）とは分けて案内する。
+    if (/Script function not found/i.test(t)) {
+      return 'デプロイされているコードが古く、doPost が見つかりません。'
+        + 'Apps Scriptの「デプロイを管理」→ 対象デプロイの鉛筆（編集）→ バージョンを「新バージョン」にしてデプロイし直してください（URLは変わりません）。';
+    }
     if (/見つかりません|not found|does not exist|存在しません/i.test(t)) {
       return 'デプロイURLが見つかりません。最新のデプロイURL（末尾 /exec）をGAS_URLに設定してください。';
     }
