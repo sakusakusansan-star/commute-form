@@ -39,6 +39,10 @@
   .topbar-name { font-size: 15px; font-weight: 800; color: #1B2A4A; }
   .topbar-switch { font-size: 11px; color: #97A3AE; text-decoration: underline; margin-top: 2px; }
   .topbar-month { font-size: 13px; color: #6B7986; text-align: right; }
+  .load-error { margin: 10px 14px; padding: 12px 14px; border: 1px solid #F0B4B4; border-radius: 10px;
+    background: #FDF2F2; color: #922; font-size: 13px; line-height: 1.6; }
+  .load-error button { margin-top: 10px; padding: 8px 18px; border: 0; border-radius: 8px;
+    background: #922; color: #fff; font-size: 14px; }
 
   .page { display: none; }
   .page.active { display: block; }
@@ -139,6 +143,8 @@
     </div>
     <div class="topbar-month" id="topbar-month">読み込み中...</div>
   </div>
+
+  <div id="load-error" class="load-error" style="display:none;"></div>
 
   <!-- 入力タブ -->
   <div id="page-input" class="page active">
@@ -325,13 +331,15 @@
   var MAX_ATTEMPTS = 5;      // 初回 + 再試行4回（404は即座に返るので待ち時間は最大6秒ほど）
   var RETRY_WAIT_MS = 600;
 
-  function callApi(action, params, timeoutMs) {
+  function callApi(action, params, timeoutMs, onRetry) {
     // GASはコールドスタートで数秒かかることがあるため、既定を長めに取る。
     timeoutMs = timeoutMs || 30000;
     var body = JSON.stringify(Object.assign({ action: action }, params || {}));
     var maxAttempts = RETRY_SAFE_ACTIONS[action] ? MAX_ATTEMPTS : 1;
 
     function attempt(n) {
+      // 再試行中は黙って待たせず、何回目かを画面に出せるようにする。
+      if (onRetry && n > 1) onRetry(n, maxAttempts);
       return requestOnce(body, timeoutMs).catch(function(err) {
         if (err.transient && n < maxAttempts) {
           return wait(RETRY_WAIT_MS * n).then(function() { return attempt(n + 1); });
@@ -355,17 +363,35 @@
     return err;
   }
 
+  // setTimeout を1本置くだけだと、タブが裏に回った時のスロットリングで
+  // 期限が来ても発火せず、「読み込み中...」のまま無言で固まることがある。
+  // 1秒ごとに実時間（Date.now）を見に行く形にして、必ず打ち切れるようにする。
+  function startDeadline(ms, onExpire) {
+    var limit = Date.now() + ms;
+    var id = setInterval(function() {
+      if (Date.now() < limit) return;
+      clearInterval(id);
+      onExpire();
+    }, 1000);
+    return function() { clearInterval(id); };
+  }
+
   function requestOnce(body, timeoutMs) {
     return new Promise(function(resolve, reject) {
       var settled = false;
-      var timer = setTimeout(function() {
+      var controller = (typeof AbortController === 'function') ? new AbortController() : null;
+      var clearDeadline = startDeadline(timeoutMs, function() {
         if (settled) return;
         settled = true;
+        // 応答が返らないまま放置すると接続が残り続けるので、明示的に打ち切る。
+        if (controller) { try { controller.abort(); } catch (e) {} }
         // タイムアウトを自動で投げ直しても待ち時間が積み上がるだけなので再試行しない。
         reject(permanentError('通信がタイムアウトしました（' + (timeoutMs/1000) + '秒）。'));
-      }, timeoutMs);
+      });
       var status = 0, finalUrl = '';
-      fetch(gasUrlFor(currentStaff), { method: 'POST', body: body })
+      var options = { method: 'POST', body: body };
+      if (controller) options.signal = controller.signal;
+      fetch(gasUrlFor(currentStaff), options)
         // JSON決め打ちで読むと、GASがHTML（ログイン画面や権限エラー画面）を
         // 返した時に「Unexpected token '<'」としか分からないため、
         // 一旦テキストで受けてから自前でJSONに変換する。
@@ -377,7 +403,7 @@
         .then(function(text) {
           if (settled) return;
           settled = true;
-          clearTimeout(timer);
+          clearDeadline();
           var json;
           try {
             json = JSON.parse(text);
@@ -391,7 +417,7 @@
         .catch(function(err) {
           if (settled) return;
           settled = true;
-          clearTimeout(timer);
+          clearDeadline();
           reject(permanentError(describeFetchError(err)));
         });
     });
@@ -527,6 +553,20 @@
     return partial.length === 1 ? partial[0] : null;
   }
 
+  // alert は端末や自動操作で勝手に閉じられると何も残らず、
+  // 「読み込み中...」のまま止まっているように見えてしまう。
+  // 読み込み失敗は画面に居座るバナーで出し、その場でやり直せるようにする。
+  function showLoadError(message) {
+    var el = document.getElementById('load-error');
+    el.innerHTML = '読み込みエラー: ' + message
+      + '<br><button type="button" onclick="startApp()">もう一度読み込む</button>';
+    el.style.display = 'block';
+  }
+
+  function hideLoadError() {
+    document.getElementById('load-error').style.display = 'none';
+  }
+
   // 名前が一致しなかったときに一覧から選び直してもらう
   function resolveStaffAndRetry(want) {
     callApi('getStaffList').then(function(list) {
@@ -541,7 +581,7 @@
       }
     }).catch(function(err) {
       document.getElementById('topbar-month').textContent = '読み込みエラー';
-      alert('読み込みエラー: ' + err.message);
+      showLoadError(err.message);
     });
   }
 
@@ -593,9 +633,15 @@
     document.getElementById('main-app').style.display = 'block';
     document.getElementById('topbar-name').textContent = currentStaff;
 
+    var monthEl = document.getElementById('topbar-month');
+    monthEl.textContent = '読み込み中...';
+    hideLoadError();
+
     // 月情報と場所一覧は1リクエストにまとめる。別々に投げるとGASの実行が
     // 2本並行して走り、初回読み込みがタイムアウトしやすい。
-    callApi('getInitialData', { staffName: currentStaff }, 40000).then(function(res) {
+    callApi('getInitialData', { staffName: currentStaff }, 40000, function(n, max) {
+      monthEl.textContent = '読み込み中... (' + n + '/' + max + ')';
+    }).then(function(res) {
       monthInfo = res.monthInfo;
       placeList = res.placeList;
       document.getElementById('topbar-month').textContent = monthInfo.year + '年' + monthInfo.month + '月';
@@ -612,8 +658,8 @@
         resolveStaffAndRetry(currentStaff);
         return;
       }
-      document.getElementById('topbar-month').textContent = '読み込みエラー';
-      alert('読み込みエラー: ' + err.message);
+      monthEl.textContent = '読み込みエラー';
+      showLoadError(err.message);
     });
   }
 
