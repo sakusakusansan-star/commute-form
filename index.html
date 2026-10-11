@@ -964,10 +964,19 @@
   }
 
   // ===== 設定 =====
+  // 月だけ選んだときの年。GAS側の guessYear_ と同じ決め方
+  // （12月に「1月」を選べば翌年、1月に「12月」を選べば前年）。
+  function guessYear(month) {
+    var now = new Date();
+    var diff = Number(month) - (now.getMonth() + 1);
+    return now.getFullYear() + (diff > 6 ? -1 : diff < -6 ? 1 : 0);
+  }
+
   function changeSettingsMonth() {
     var month = document.getElementById('sel-month').value;
     if (!month) return;
-    if (!confirm(monthInfo.year + '年' + month + '月に切り替えます。カレンダーが再生成され、今のデータは失われます。よろしいですか？')) {
+    if (!confirm(guessYear(month) + '年' + month + '月に切り替えます。カレンダーが再生成され、今のデータは失われます。\n' +
+        '（今月分をまだPDF保存していなければ、先に「PDF保存」をしてください）\nよろしいですか？')) {
       document.getElementById('sel-month').value = '';
       return;
     }
