@@ -92,6 +92,9 @@ const PDF_ROOT_FOLDER_ID = "1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o";
 
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
+// コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
+const CODE_VERSION = '2026-10-11';
+
 // ── 年の判定 ─────────────────────────────────────────────────
 // 以前は年を 2026 に固定していたため、年をまたぐと
 // 「2026年1月」として作り直され、曜日もPDFのファイル名もずれていた。
@@ -645,7 +648,7 @@ function mapQuery(src, dest, type, result) {
 // ここでログイン画面やエラーHTMLが出る場合、原因はコードではなく
 // デプロイ設定（アクセスできるユーザー）です。
 function doGet(e) {
-  var info = { status: 'ready', time: new Date().toISOString() };
+  var info = { status: 'ready', version: CODE_VERSION, staff: getStaffInBook_(), time: new Date().toISOString() };
   try {
     info.effectiveUser = Session.getEffectiveUser().getEmail();
   } catch (err) {
