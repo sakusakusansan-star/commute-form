@@ -2,9 +2,15 @@
 //  稼働費計算スプレッドシート - Google Apps Script
 //
 //  【セットアップ手順】
+//  ※ 福山・古川・清田の「稼働費計算_GAS版」と、山口さんの
+//    「山口_稼働費計算_GAS版」の両方に、このファイルをそのまま貼る。
+//    スタッフは STAFF_HOME のうち、そのブックにシートがある人だけが
+//    フォームに出るので、ブックごとに書き換える必要はない。
+//    （以前は山口さん用のコピーがあったが、直し忘れを防ぐため1本にまとめた）
+//
 //  1. スプレッドシートをGoogleドライブにアップロード
 //     → 右クリック →「Googleスプレッドシートで開く」
-//  2. 拡張機能 → Apps Script → このコードを貼り付けて保存
+//  2. 拡張機能 → Apps Script → 既存のコードを全て削除してこれを貼り付けて保存
 //  3. スプレッドシートを再読み込みすると「📋 稼働費管理」メニューが出る
 //  4. 「⚙️ 初期設定（初回のみ）」を実行 → Maps API の権限を許可
 //     ※このとき自動計算用の編集トリガー（インストール型）も登録されます。
@@ -34,7 +40,8 @@
 // ============================================================
 
 const CONFIG = {
-  year: 2026,
+  // 年は固定しない。シートの日付（A列）から読み、無ければ今日に近い年を選ぶ。
+  // → sheetYear_ / guessYear_
   ratePerKm: 15,       // 円/km
   dataStartRow: 6,     // データ開始行
   MONTH_ROW: 2,
@@ -57,10 +64,13 @@ const CONFIG = {
   },
 
   // スタッフ名 → 自宅の短縮名（稼働場所リストと一致させる）
+  // 両方のブックで同じ一覧を使う。そのブックに同名のシートが無い人は
+  // フォームの名前一覧に出ない（getStaffInBook_）。
   STAFF_HOME: {
     '福山康平': '福山自宅',
     '古川泰成': '古川自宅',
     '清田和男': '清田自宅',
+    '山口真人': '山口自宅',
   },
 
   PLACE_SHEET: '稼働場所',  // 場所マスタシート名
@@ -81,6 +91,42 @@ const CONFIG = {
 const PDF_ROOT_FOLDER_ID = "1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o";
 
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
+
+// コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
+const CODE_VERSION = '2026-10-11';
+
+// ── 年の判定 ─────────────────────────────────────────────────
+// 以前は年を 2026 に固定していたため、年をまたぐと
+// 「2026年1月」として作り直され、曜日もPDFのファイル名もずれていた。
+
+// 月だけ分かっているときの年。今日から見て一番近い年を選ぶ。
+//   12月に「1月」を選ぶ → 翌年 ／ 1月に「12月」を開く → 前年
+function guessYear_(month) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const diff = Number(month) - (now.getMonth() + 1);
+  if (diff > 6) return y - 1;
+  if (diff < -6) return y + 1;
+  return y;
+}
+
+// シートが何年のものか。月を更新したときにA列へ =DATE(年,月,日) を
+// 書いているので、1日の行から読む。読めなければ guessYear_ に任せる。
+function sheetYear_(sheet, month) {
+  const v = sheet.getRange(CONFIG.dataStartRow, CONFIG.COL.DATE).getValue();
+  if (v instanceof Date && !isNaN(v.getTime()) && v.getMonth() + 1 === Number(month)) {
+    return v.getFullYear();
+  }
+  return guessYear_(month);
+}
+
+// このブックにシートがあるスタッフだけを返す
+function getStaffInBook_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return Object.keys(CONFIG.STAFF_HOME).filter(function(name) {
+    return !!ss.getSheetByName(name);
+  });
+}
 
 // 距離取得に失敗した時に備考(K列)へ書くメッセージの接頭辞。
 // 手入力の備考を消さずに、スクリプトが書いたものだけをクリアするための目印。
@@ -183,7 +229,7 @@ function testExportPdf() {
   }
   // アクティブシートがスタッフシートでなければ、設定済みスタッフの先頭を使う
   if (!CONFIG.STAFF_HOME[name]) {
-    name = Object.keys(CONFIG.STAFF_HOME)[0];
+    name = getStaffInBook_()[0];
   }
 
   try {
@@ -212,17 +258,18 @@ function updateMonth() {
     return;
   }
 
-  const res = ui.alert(`${month}月に更新`, `「${name}」を${month}月で更新します。\n既存データは上書きされます。よろしいですか？`, ui.ButtonSet.YES_NO);
+  const year = guessYear_(month);
+  const res = ui.alert(`${year}年${month}月に更新`, `「${name}」を${year}年${month}月で更新します。\n既存データは上書きされます。よろしいですか？`, ui.ButtonSet.YES_NO);
   if (res !== ui.Button.YES) return;
 
-  buildMonthRows(sheet, month);
+  buildMonthRows(sheet, month, year);
   setupDropdowns(sheet);
-  ui.alert(`✅ ${month}月のカレンダーを生成しました。\nC列で場所を選ぶと距離が自動で入ります。`);
+  ui.alert(`✅ ${year}年${month}月のカレンダーを生成しました。\nC列で場所を選ぶと距離が自動で入ります。`);
 }
 
 // ── 月のカレンダー行を生成 ───────────────────────────────────
-function buildMonthRows(sheet, month) {
-  const year = CONFIG.year;
+function buildMonthRows(sheet, month, year) {
+  year = year || guessYear_(month);
   const C    = CONFIG.COL;
   const startRow = CONFIG.dataStartRow;
   const daysInMonth = new Date(year, month, 0).getDate();
@@ -480,7 +527,7 @@ function refreshAllDistances() {
   }
 
   const month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
-  const daysInMonth = new Date(CONFIG.year, month, 0).getDate();
+  const daysInMonth = new Date(sheetYear_(sheet, month), month, 0).getDate();
   const startRow    = CONFIG.dataStartRow;
   const C = CONFIG.COL;
 
@@ -601,7 +648,7 @@ function mapQuery(src, dest, type, result) {
 // ここでログイン画面やエラーHTMLが出る場合、原因はコードではなく
 // デプロイ設定（アクセスできるユーザー）です。
 function doGet(e) {
-  var info = { status: 'ready', time: new Date().toISOString() };
+  var info = { status: 'ready', version: CODE_VERSION, staff: getStaffInBook_(), time: new Date().toISOString() };
   try {
     info.effectiveUser = Session.getEffectiveUser().getEmail();
   } catch (err) {
@@ -611,9 +658,18 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+// 読むだけの操作。これ以外（書き込み）は同時に走らないようロックをかける。
+// 空き行を探して書く submitIrregular や、行を消す deletePlace が
+// 2本同時に動くと、同じ行に書いたり別の行を消したりするため。
+var READ_ONLY_ACTIONS = {
+  getStaffList: true, getInitialData: true, getMonthInfo: true,
+  getPlaceList: true, getPlaceListManage: true, getMyEntries: true
+};
+
 // ── Webアプリのエントリーポイント ───────────────────────────
 function doPost(e) {
   var out;
+  var lock = null;
   try {
     if (!e || !e.postData || !e.postData.contents) {
       throw new Error('リクエスト本文が空です');
@@ -622,8 +678,16 @@ function doPost(e) {
     var action = req.action;
     var data;
 
+    if (!READ_ONLY_ACTIONS[action]) {
+      lock = LockService.getScriptLock();
+      if (!lock.tryLock(25000)) {
+        lock = null;
+        throw new Error('ほかの人の処理が終わっていません。少し待ってからもう一度お試しください。');
+      }
+    }
+
     if (action === 'getStaffList') {
-      data = Object.keys(CONFIG.STAFF_HOME);
+      data = getStaffInBook_();
     } else if (action === 'getInitialData') {
       data = getInitialData(req.staffName);
     } else if (action === 'getMonthInfo') {
@@ -656,9 +720,12 @@ function doPost(e) {
       throw new Error('不明なaction: ' + action);
     }
 
+    if (lock) SpreadsheetApp.flush();
     out = { ok: true, data: data };
   } catch (err) {
     out = { ok: false, error: err.message };
+  } finally {
+    if (lock) lock.releaseLock();
   }
   return ContentService.createTextOutput(JSON.stringify(out))
     .setMimeType(ContentService.MimeType.JSON);
@@ -701,7 +768,8 @@ function getInitialData(staffName) {
 function getMonthInfoWeb(staffName) {
   var sheet = getCommuteSheet(staffName);
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
-  var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
+  var year = sheetYear_(sheet, month);
+  var daysInMonth = new Date(year, month, 0).getDate();
   var C = CONFIG.COL;
   var range = getIrregularRowRange();
 
@@ -723,7 +791,7 @@ function getMonthInfoWeb(staffName) {
   }
 
   return {
-    year: CONFIG.year,
+    year: year,
     month: month,
     daysInMonth: daysInMonth,
     filledDays: filledDays,
@@ -916,7 +984,7 @@ function submitIrregular(staffName, data) {
   var distanceKm = Number(data.distanceKm) || 0;
   var amount = Math.round(distanceKm * CONFIG.ratePerKm);
 
-  sheet.getRange(targetRow, 1).setValue(new Date(CONFIG.year, month - 1, Number(data.day))).setNumberFormat('m/d');
+  sheet.getRange(targetRow, 1).setValue(new Date(sheetYear_(sheet, month), month - 1, Number(data.day))).setNumberFormat('m/d');
   sheet.getRange(targetRow, C.PLACE).setValue(data.content);
   sheet.getRange(targetRow, C.TOTAL_AMT).setValue(amount);
   sheet.getRange(targetRow, C.NOTE).setValue(distanceKm ? (distanceKm + 'km') : '');
@@ -929,7 +997,7 @@ function getMyEntries(staffName) {
   var sheet = getCommuteSheet(staffName);
   var C = CONFIG.COL;
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
-  var daysInMonth = new Date(CONFIG.year, month, 0).getDate();
+  var daysInMonth = new Date(sheetYear_(sheet, month), month, 0).getDate();
 
   var range    = getIrregularRowRange();
   var firstRow = CONFIG.dataStartRow;
@@ -1017,10 +1085,11 @@ function resetMonthWeb(staffName, month) {
   if (!month || month < 1 || month > 12) {
     throw new Error('月の指定が不正です');
   }
+  var year = guessYear_(month);
   sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).setValue(month);
-  buildMonthRows(sheet, month);
+  buildMonthRows(sheet, month, year);
   setupDropdowns(sheet);
-  return { year: CONFIG.year, month: month };
+  return { year: year, month: month };
 }
 
 // ── Google DriveへPDF保存（指定フォルダへ直接保存） ──────────
@@ -1041,7 +1110,7 @@ function exportCommutePdf(staffName) {
       + 'スクリプトの実行アカウントにこのフォルダの編集権限があるか確認してください。');
   }
 
-  var fileName = CONFIG.year + '年' + month + '月_' + staffName + '_稼働費.pdf';
+  var fileName = sheetYear_(sheet, month) + '年' + month + '月_' + staffName + '_稼働費.pdf';
   var pdfBlob = exportCommuteSheetAsPdf(ss, sheet).setName(fileName);
 
   var existingFiles = targetFolder.getFilesByName(fileName);
