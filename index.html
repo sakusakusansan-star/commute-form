@@ -288,6 +288,7 @@
 
 </div>
 
+<script src="sieg-nav.js"></script>
 <script>
   // 福山・古川・清田は同じスプレッドシート（1つのGASデプロイ）に同居しているが、
   // 山口さんは現場が別エリアのため専用スプレッドシート・専用デプロイを使う。
@@ -527,7 +528,8 @@
       startApp();
       return;
     }
-    currentStaff = localStorage.getItem(STAFF_KEY);
+    // 交通費を使ったことがない端末では、ポータルで選んだ名前（苗字）を正式名にして使う
+    currentStaff = localStorage.getItem(STAFF_KEY) || SiegNav.staff(Object.keys(STAFF_ALIASES));
     if (currentStaff) {
       currentStaff = resolveAlias(currentStaff);
       startApp();
