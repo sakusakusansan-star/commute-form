@@ -4,120 +4,136 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>稼働費入力</title>
+<meta name="theme-color" content="#EFF1F4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C1015" media="(prefers-color-scheme: dark)">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<link rel="stylesheet" href="sieg-theme.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
   html { font-size: 16px; }
   body {
-    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
-    background: #EEF2F6; min-height: 100vh;
+    font-family: var(--sg-font);
+    background: var(--sg-bg); min-height: 100vh;
     padding: 10px 10px 30px;
-    color: #26323D;
+    color: var(--sg-ink);
   }
 
   #staff-select-screen {
-    position: fixed; inset: 0; background: linear-gradient(135deg, #1B2A4A 0%, #2D5F8A 100%);
+    position: fixed; inset: 0; background: var(--sg-primary);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     padding: 24px; z-index: 999;
   }
   #staff-select-screen.hidden { display: none; }
-  .ss-title { color: white; font-size: 19px; font-weight: bold; margin-bottom: 24px; text-align: center; }
+  .ss-title { color: var(--sg-on-primary); font-size: 19px; font-weight: bold; margin-bottom: 24px; text-align: center; }
   .ss-btn {
     width: 100%; max-width: 320px; padding: 18px; margin-bottom: 12px;
-    background: white; color: #1B2A4A; border: none; border-radius: 12px;
+    background: var(--sg-surface); color: var(--sg-ink); border: none; border-radius: 12px;
     font-size: 17px; font-weight: bold; cursor: pointer;
   }
-  .ss-btn:active { background: #C8A951; color: white; }
+  .ss-btn:active { background: var(--sg-amber); color: var(--sg-on-primary); }
 
-  .tabs { display: flex; background: #fff; border-radius: 14px; margin-bottom: 10px; overflow: hidden; box-shadow: 0 1px 6px rgba(0,0,0,.07); }
-  .tab { flex: 1; padding: 15px 6px; text-align: center; font-size: 13px; font-weight: 700; color: #97A3AE; border-bottom: 3px solid transparent; }
-  .tab.active { color: #2D5F8A; border-bottom-color: #2D5F8A; }
+  /* タブは画面の下（sieg-theme.css の .sg-tabbar） */
 
-  .topbar { background: #fff; border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.07); display: flex; justify-content: space-between; align-items: center; }
-  .topbar-name { font-size: 15px; font-weight: 800; color: #1B2A4A; }
-  .topbar-switch { font-size: 11px; color: #97A3AE; text-decoration: underline; margin-top: 2px; }
-  .topbar-month { font-size: 13px; color: #6B7986; text-align: right; }
-  .load-error { margin: 10px 14px; padding: 12px 14px; border: 1px solid #F0B4B4; border-radius: 10px;
-    background: #FDF2F2; color: #922; font-size: 13px; line-height: 1.6; }
+  .topbar { background: var(--sg-surface); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; box-shadow: var(--sg-lift); display: flex; justify-content: space-between; align-items: center; }
+  .topbar-name { font-size: 15px; font-weight: 800; color: var(--sg-ink); }
+  .topbar-switch { font-size: 11px; color: var(--sg-faint); text-decoration: underline; margin-top: 2px; }
+  .topbar-month { font-size: 13px; color: var(--sg-mute); text-align: right; }
+  .load-error { margin: 10px 14px; padding: 12px 14px; border: 1px solid var(--sg-red); border-radius: 10px;
+    background: var(--sg-red-tint); color: var(--sg-red); font-size: 13px; line-height: 1.6; }
   .load-error button { margin-top: 10px; padding: 8px 18px; border: 0; border-radius: 8px;
-    background: #922; color: #fff; font-size: 14px; }
+    background: var(--sg-red); color: var(--sg-on-primary); font-size: 14px; }
 
   .page { display: none; }
   .page.active { display: block; }
 
   .type-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-  .type-btn { padding: 14px 4px; border: 2px solid #DDE4EA; border-radius: 12px; background: #fff; font-size: 14px; font-weight: 700; color: #6B7280; }
-  .type-btn.active { border-color: #2D5F8A; background: #EEF2F7; color: #1B2A4A; }
+  .type-btn { padding: 14px 4px; border: 2px solid var(--sg-hair); border-radius: 12px; background: var(--sg-surface); font-size: 14px; font-weight: 700; color: var(--sg-mute); }
+  .type-btn.active { border-color: var(--sg-primary); background: var(--sg-blue-tint); color: var(--sg-ink); }
 
-  .card { background: #fff; border-radius: 14px; padding: 16px; margin-bottom: 10px; box-shadow: 0 1px 6px rgba(0,0,0,.07); }
-  .card-label { font-size: 12px; font-weight: 700; color: #6B7986; margin-bottom: 10px; }
+  .card { background: var(--sg-surface); border-radius: 14px; padding: 16px; margin-bottom: 10px; box-shadow: var(--sg-lift); }
+  .card-label { font-size: 12px; font-weight: 700; color: var(--sg-mute); margin-bottom: 10px; }
 
   input[type="text"], input[type="number"], select {
-    width: 100%; padding: 14px; border: 2px solid #DDE4EA;
-    border-radius: 10px; font-size: 16px; color: #26323D; background: #FAFBFC;
+    width: 100%; padding: 14px; border: 2px solid var(--sg-hair);
+    border-radius: 10px; font-size: 16px; color: var(--sg-ink); background: var(--sg-sunk);
     -webkit-appearance: none; appearance: none;
   }
-  input:focus, select:focus { outline: none; border-color: #2D5F8A; background: #fff; }
+  input:focus, select:focus { outline: none; border-color: var(--sg-primary); background: var(--sg-surface); }
 
   .quick-places { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-  .qp-btn { padding: 13px 4px; border: 2px solid #DDE4EA; border-radius: 10px; background: #FAFBFC; font-size: 13px; font-weight: 700; color: #4A5865; }
-  .qp-btn.selected { border-color: #2D5F8A; background: #EEF2F7; color: #1B2A4A; }
+  .qp-btn { padding: 13px 4px; border: 2px solid var(--sg-hair); border-radius: 10px; background: var(--sg-sunk); font-size: 13px; font-weight: 700; color: var(--sg-ink2); }
+  .qp-btn.selected { border-color: var(--sg-primary); background: var(--sg-blue-tint); color: var(--sg-ink); }
 
   .cal-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .cal-nav { background: #F2F6F9; border: none; border-radius: 10px; width: 44px; height: 40px; font-size: 16px; color: #2D5F8A; font-weight: 700; }
-  .cal-title { font-size: 15px; font-weight: 800; color: #2D5F8A; }
+  .cal-nav { background: var(--sg-sunk); border: none; border-radius: 10px; width: 44px; height: 40px; font-size: 16px; color: var(--sg-blue); font-weight: 700; }
+  .cal-title { font-size: 15px; font-weight: 800; color: var(--sg-blue); }
   .cal-dow-grid, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-  .cal-dow { text-align: center; font-size: 10px; color: #97A3AE; padding: 4px 0; font-weight: 700; }
-  .cal-dow.sat { color: #1565C0; } .cal-dow.sun { color: #C62828; }
-  .cal-day { text-align: center; font-size: 15px; font-weight: 600; border-radius: 8px; color: #26323D; min-height: 42px; display: flex; align-items: center; justify-content: center; position: relative; }
-  .cal-day.sat { color: #1565C0; } .cal-day.sun { color: #C62828; }
-  .cal-day.filled::after { content: ''; position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: #2E7D32; }
-  .cal-day.start, .cal-day.end { background: #2D5F8A !important; color: #fff !important; font-weight: 800; }
-  .cal-day.in-range { background: #C6DCF2; color: #0C447C; border-radius: 0; }
+  .cal-dow { text-align: center; font-size: 10px; color: var(--sg-faint); padding: 4px 0; font-weight: 700; }
+  .cal-dow.sat { color: var(--sg-sat); } .cal-dow.sun { color: var(--sg-red); }
+  .cal-day { text-align: center; font-size: 15px; font-weight: 600; border-radius: 8px; color: var(--sg-ink); min-height: 42px; display: flex; align-items: center; justify-content: center; position: relative; }
+  .cal-day.sat { color: var(--sg-sat); } .cal-day.sun { color: var(--sg-red); }
+  .cal-day.filled::after { content: ''; position: absolute; bottom: 4px; width: 4px; height: 4px; border-radius: 50%; background: var(--sg-green); }
+  .cal-day.start, .cal-day.end { background: var(--sg-primary) !important; color: var(--sg-on-primary) !important; font-weight: 800; }
+  .cal-day.in-range { background: var(--sg-blue-tint); color: var(--sg-ink); border-radius: 0; }
   .cal-day.empty { pointer-events: none; }
-  .range-info { text-align: center; margin-top: 8px; font-size: 13px; font-weight: 700; color: #97A3AE; min-height: 18px; }
-  .range-info.set { color: #2D5F8A; }
+  .range-info { text-align: center; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--sg-faint); min-height: 18px; }
+  .range-info.set { color: var(--sg-blue); }
 
   .hw-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .hw-btn { padding: 14px 4px; border: 2px solid #DDE4EA; border-radius: 10px; background: #fff; font-size: 15px; font-weight: 700; color: #6B7280; }
-  .hw-btn.active { border-color: #2D5F8A; background: #EEF2F7; color: #1B2A4A; }
+  .hw-btn { padding: 14px 4px; border: 2px solid var(--sg-hair); border-radius: 10px; background: var(--sg-surface); font-size: 15px; font-weight: 700; color: var(--sg-mute); }
+  .hw-btn.active { border-color: var(--sg-primary); background: var(--sg-blue-tint); color: var(--sg-ink); }
   .toll-fields { display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
   .toll-fields.show { display: grid; }
-  .field-label { font-size: 11px; color: #9CA3AF; margin-bottom: 6px; display: block; }
+  .field-label { font-size: 11px; color: var(--sg-faint); margin-bottom: 6px; display: block; }
 
-  .estimate-box { background: #EEF2F7; border-radius: 10px; padding: 12px 14px; text-align: center; margin: 10px 0; }
-  .estimate-label { font-size: 11px; color: #6B7280; margin-bottom: 2px; }
-  .estimate-val { font-size: 20px; font-weight: 800; color: #1B2A4A; }
+  .estimate-box { background: var(--sg-blue-tint); border-radius: 10px; padding: 12px 14px; text-align: center; margin: 10px 0; }
+  .estimate-label { font-size: 11px; color: var(--sg-mute); margin-bottom: 2px; }
+  .estimate-val { font-size: 20px; font-weight: 800; color: var(--sg-ink); }
 
-  .btn-submit { width: 100%; padding: 16px; background: #2D5F8A; color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: 800; min-height: 54px; margin-top: 4px; }
-  .btn-submit:active { background: #1a4a6e; }
+  .btn-submit { width: 100%; padding: 16px; background: var(--sg-primary); color: var(--sg-on-primary); border: none; border-radius: 12px; font-size: 16px; font-weight: 800; min-height: 54px; margin-top: 4px; }
+  .btn-submit:active { background: var(--sg-primary); }
   #result { text-align: center; font-size: 14px; font-weight: 700; min-height: 18px; margin-top: 10px; }
-  .success { color: #2E7D32; } .error-msg { color: #C62828; }
+  .success { color: var(--sg-green); } .error-msg { color: var(--sg-red); }
 
-  .irreg-note { font-size: 12px; color: #9CA3AF; margin-bottom: 10px; text-align: right; }
+  .irreg-note { font-size: 12px; color: var(--sg-faint); margin-bottom: 10px; text-align: right; }
 
-  .entry-item { border-left: 4px solid #2D5F8A; border-radius: 0 10px 10px 0; background: #F9FAFB; padding: 12px 14px; margin-bottom: 8px; }
-  .entry-item.irregular { border-color: #C0504D; }
+  .entry-item { border-left: 4px solid var(--sg-primary); border-radius: 0 10px 10px 0; background: var(--sg-sunk); padding: 12px 14px; margin-bottom: 8px; }
+  .entry-item.irregular { border-color: var(--sg-red); }
   .entry-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-  .entry-date { font-size: 13px; font-weight: 800; color: #2D5F8A; }
-  .entry-amount { font-size: 15px; font-weight: 800; color: #1B2A4A; }
-  .entry-detail { font-size: 13px; color: #4A5865; }
-  .btn-del { font-size: 12px; color: #DC2626; background: none; border: none; margin-top: 6px; padding: 4px; }
-  .empty-msg { text-align: center; color: #9CA3AF; font-size: 14px; padding: 30px 0; }
+  .entry-date { font-size: 13px; font-weight: 800; color: var(--sg-blue); }
+  .entry-amount { font-size: 15px; font-weight: 800; color: var(--sg-ink); }
+  .entry-detail { font-size: 13px; color: var(--sg-ink2); }
+  .btn-del { font-size: 12px; color: var(--sg-red); background: none; border: none; margin-top: 6px; padding: 4px; }
+  .empty-msg { text-align: center; color: var(--sg-faint); font-size: 14px; padding: 30px 0; }
 
-  .btn-pdf { width: 100%; padding: 16px; background: linear-gradient(135deg, #2D5F8A, #1B2A4A); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: bold; margin-top: 4px; }
+  .btn-pdf { width: 100%; padding: 16px; background: var(--sg-primary); color: var(--sg-on-primary); border: none; border-radius: 12px; font-size: 15px; font-weight: bold; margin-top: 4px; }
 
-  .place-item { background: #F9FAFB; border-radius: 10px; padding: 12px; margin-bottom: 8px; }
+  .place-item { background: var(--sg-sunk); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
   .place-item input { margin-bottom: 8px; }
   .place-item input:last-of-type { margin-bottom: 10px; }
   .place-item-actions { display: flex; gap: 8px; }
   .place-item-actions button { flex: 1; padding: 10px; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; }
-  .btn-save-place { background: #2D5F8A; color: #fff; }
-  .btn-del-place { background: #FEE2E2; color: #DC2626; }
-  .place-add-box { margin-top: 14px; padding-top: 14px; border-top: 1px solid #E5E9EE; }
-  .place-list-toggle { margin-top: 16px; padding: 12px 4px; text-align: center; font-size: 13px; font-weight: 700; color: #2D5F8A; border-top: 1px solid #E5E9EE; cursor: pointer; }
+  .btn-save-place { background: var(--sg-primary); color: var(--sg-on-primary); }
+  .btn-del-place { background: var(--sg-red-tint); color: var(--sg-red); }
+  .place-add-box { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--sg-hair); }
+  .place-list-toggle { margin-top: 16px; padding: 12px 4px; text-align: center; font-size: 13px; font-weight: 700; color: var(--sg-blue); border-top: 1px solid var(--sg-hair); cursor: pointer; }
+
+  /* ═══ 共通の見た目（sieg-theme.css）に合わせる ═══
+     色は上ですべて --sg-* につないである。ここでは形と「選択中」の見せ方をそろえる。 */
+  body { background: var(--sg-bg); color: var(--sg-ink); }
+  #staff-select-screen { background: var(--sg-bg); }
+  .ss-title { color: var(--sg-ink); }
+  .ss-sub, .ss-loading { color: var(--sg-mute); }
+  .ss-btn { background: var(--sg-surface); color: var(--sg-ink); box-shadow: var(--sg-lift); border: 1px solid var(--sg-hair); border-radius: var(--sg-r-sm); }
+  .ss-btn:active { background: var(--sg-primary); color: var(--sg-on-primary); }
+  body { padding-bottom: calc(30px + var(--sg-tabbar-h)); }
+  .card, .topbar { border-radius: var(--sg-r); }
+  .type-btn, .qp-btn, .hw-btn, input[type="text"], input[type="number"], select, .btn-submit, .btn-pdf { border-radius: var(--sg-r-sm); }
+  .type-btn.active, .qp-btn.selected, .hw-btn.active { background: var(--sg-primary); border-color: var(--sg-primary); color: var(--sg-on-primary); }
+  .cal-day.in-range { color: var(--sg-ink); }
+  #ss-msg { color: var(--sg-red) !important; }
 </style>
 </head>
 <body>
@@ -130,11 +146,11 @@
 
 <div id="main-app" style="display:none;">
 
-  <div class="tabs">
-    <div class="tab active" id="tab-input" onclick="switchTab('input')">入力</div>
-    <div class="tab" id="tab-confirm" onclick="switchTab('confirm')">確認・修正</div>
-    <div class="tab" id="tab-settings" onclick="switchTab('settings')">設定</div>
-  </div>
+  <nav class="tabs sg-tabbar" aria-label="画面の切り替え">
+    <button type="button" class="tab sg-tab active" id="tab-input" onclick="switchTab('input')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>入力</button>
+    <button type="button" class="tab sg-tab" id="tab-confirm" onclick="switchTab('confirm')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>確認・修正</button>
+    <button type="button" class="tab sg-tab" id="tab-settings" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>設定</button>
+  </nav>
 
   <div class="topbar">
     <div>
@@ -251,7 +267,7 @@
   <div id="page-settings" class="page">
     <div class="card">
       <div class="card-label">📅 対象月の変更</div>
-      <p style="font-size:13px;color:#6B7280;margin-bottom:12px;">月を選ぶとその月のカレンダーが再生成されます（入力済みデータはリセットされます）。</p>
+      <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">月を選ぶとその月のカレンダーが再生成されます（入力済みデータはリセットされます）。</p>
       <select id="sel-month" onchange="changeSettingsMonth()">
         <option value="">月を選択</option>
         <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
@@ -264,14 +280,14 @@
 
     <div class="card">
       <div class="card-label">📄 PDF保存</div>
-      <p style="font-size:13px;color:#6B7280;margin-bottom:12px;">今月の稼働費シートをPDFにしてGoogle Driveへ保存します。</p>
+      <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">今月の稼働費シートをPDFにしてGoogle Driveへ保存します。</p>
       <button class="btn-pdf" onclick="exportPdf()">📄 PDFをGoogle Driveへ保存</button>
       <div id="pdf-result" style="margin-top:10px;font-size:13px;text-align:center;"></div>
     </div>
 
     <div class="card">
       <div class="card-label">📍 稼働場所の管理</div>
-      <p style="font-size:13px;color:#6B7280;margin-bottom:12px;">稼働場所の追加・編集・削除ができます（自宅の設定はここには表示されません）。</p>
+      <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">稼働場所の追加・編集・削除ができます（自宅の設定はここには表示されません）。</p>
       <div class="place-add-box place-add-box-top">
         <label class="field-label">新しい場所を追加</label>
         <input type="text" id="new-place-name" placeholder="名称（例: 手取本町店）" style="margin-bottom:8px;">
@@ -605,7 +621,7 @@
     if (preList && preList.length) { render(preList); return; }
 
     callApi('getStaffList').then(render).catch(function(err) {
-      document.getElementById('ss-buttons').innerHTML = '<p style="color:#fff;text-align:center;">読み込みエラー: ' + err.message + '</p>';
+      document.getElementById('ss-buttons').innerHTML = '<p style="color:var(--sg-on-primary);text-align:center;">読み込みエラー: ' + err.message + '</p>';
     });
   }
 
@@ -983,26 +999,26 @@
       return;
     }
     var el = document.getElementById('reset-result');
-    el.style.color = '#6B7280'; el.textContent = '切り替え中...';
+    el.style.color = 'var(--sg-mute)'; el.textContent = '切り替え中...';
     callApi('resetMonth', { staffName: currentStaff, month: month }, 30000).then(function(res) {
-      el.style.color = '#15803D';
+      el.style.color = 'var(--sg-green)';
       el.textContent = '✅ ' + res.year + '年' + res.month + '月に切り替えました';
       document.getElementById('topbar-month').textContent = res.year + '年' + res.month + '月';
       startApp();
     }).catch(function(err) {
-      el.style.color = '#DC2626';
+      el.style.color = 'var(--sg-red)';
       el.textContent = '❌ ' + err.message;
     });
   }
 
   function exportPdf() {
     var el = document.getElementById('pdf-result');
-    el.style.color = '#6B7280'; el.textContent = '保存中...';
+    el.style.color = 'var(--sg-mute)'; el.textContent = '保存中...';
     callApi('exportPdf', { staffName: currentStaff }, 60000).then(function(msg) {
-      el.style.color = '#15803D';
+      el.style.color = 'var(--sg-green)';
       el.textContent = '✅ ' + msg;
     }).catch(function(err) {
-      el.style.color = '#DC2626';
+      el.style.color = 'var(--sg-red)';
       el.textContent = '❌ ' + err.message;
     });
   }
