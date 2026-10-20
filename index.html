@@ -310,6 +310,7 @@
 </div>
 
 <script src="sieg-nav.js"></script>
+<script src="/sieg-portal/sieg-roster.js"></script>
 <script>
   // 福山・古川・清田は同じスプレッドシート（1つのGASデプロイ）に同居しているが、
   // 山口さんは現場が別エリアのため専用スプレッドシート・専用デプロイを使う。
@@ -520,13 +521,15 @@
   }
 
   // ---- 苗字 → フルネームの即時変換テーブル ----
-  // GAS側 STAFF_HOME のキー（フルネーム）と揃えること
-  var STAFF_ALIASES = {
-    '福山': '福山康平',
-    '古川': '古川泰成',
-    '清田': '清田和男',
-    '山口': '山口真人'
-  };
+  // ポータルの名簿（sieg-roster.js）の「交通費を使う人」とフルネームから作る。
+  // フルネームは GAS側 STAFF_HOME のキーと揃えること。
+  // 名簿が読めなかったときは空になるが、そのときは GAS のスタッフ一覧から探し直す（resolveStaffAndRetry）
+  var STAFF_ALIASES = {};
+  if (window.SiegRoster) {
+    SiegRoster.forTool('commute').forEach(function(n) {
+      if (SiegRoster.fullName(n)) STAFF_ALIASES[n] = SiegRoster.fullName(n);
+    });
+  }
 
   // 通信を待たずにその場で正式名へ変換（表記ゆれ・空白は無視）
   function resolveAlias(name) {
