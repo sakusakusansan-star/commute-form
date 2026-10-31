@@ -93,7 +93,7 @@ const PDF_ROOT_FOLDER_ID = "1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o";
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
 // コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
-const CODE_VERSION = '2026-10-11';
+const CODE_VERSION = '2026-10-31';
 
 // ── 年の判定 ─────────────────────────────────────────────────
 // 以前は年を 2026 に固定していたため、年をまたぐと
@@ -282,6 +282,8 @@ function buildMonthRows(sheet, month, year) {
   const totalRow       = irregEnd + 1;
 
   sheet.getRange(startRow, 1, FIXED_DAYS, 11).clearContent().clearFormat();
+  // イレギュラー枠の中身（日付・内容・金額・備考）も消す。消さないと月を切り替えても前の月の分が残る
+  sheet.getRange(irregStart, 1, IRREG_ROWS, 11).clearContent();
 
   const dataRange = sheet.getRange(startRow, 1, FIXED_DAYS, 11);
   dataRange.setBorder(true, true, true, true, true, true, '#CCCCCC', SpreadsheetApp.BorderStyle.SOLID);
