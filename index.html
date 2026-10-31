@@ -35,12 +35,9 @@
   .ss-btn:active { background: var(--sg-amber); color: var(--sg-on-primary); }
 
   /* タブは画面の下（sieg-theme.css の .sg-tabbar）。本文も同じ幅で中央に置く（パソコンで開いても横に伸びない） */
-  #main-app { max-width: 560px; margin: 0 auto; }
+
 
   .topbar { background: var(--sg-surface); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; box-shadow: var(--sg-lift); display: flex; justify-content: space-between; align-items: center; }
-  .topbar-name { font-size: 15px; font-weight: 800; color: var(--sg-ink); }
-  .topbar-switch { font-size: 12px; color: var(--sg-mute); text-decoration: underline; margin-top: 2px; }
-  .topbar-month { font-size: 13px; color: var(--sg-mute); text-align: right; }
   .load-error { margin: 10px 14px; padding: 12px 14px; border: 1px solid var(--sg-red); border-radius: 10px;
     background: var(--sg-red-tint); color: var(--sg-red); font-size: 13px; line-height: 1.6; }
   .load-error button { margin-top: 10px; padding: 8px 18px; border: 0; border-radius: 8px;
@@ -50,7 +47,7 @@
   .page.active { display: block; }
 
   .type-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-  .type-btn { padding: 14px 4px; border: 2px solid var(--sg-hair); border-radius: 12px; background: var(--sg-surface); font-size: 14px; font-weight: 700; color: var(--sg-mute); }
+  .type-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 14px 4px; border: 2px solid var(--sg-hair); border-radius: 12px; background: var(--sg-surface); font-size: 14px; font-weight: 700; color: var(--sg-mute); }
   .type-btn.active { border-color: var(--sg-primary); background: var(--sg-blue-tint); color: var(--sg-ink); }
 
   .card { background: var(--sg-surface); border-radius: 14px; padding: 16px; margin-bottom: 10px; box-shadow: var(--sg-lift); }
@@ -135,7 +132,7 @@
   .btn-del { font-size: 13px; font-weight: 700; color: var(--sg-red); background: var(--sg-red-tint); border: none; border-radius: 8px; margin-top: 8px; min-height: 40px; padding: 8px 14px; display: inline-flex; align-items: center; }
   .empty-msg { text-align: center; color: var(--sg-mute); font-size: 14px; padding: 30px 0; }
 
-  .btn-pdf { width: 100%; padding: 16px; background: var(--sg-primary); color: var(--sg-on-primary); border: none; border-radius: 12px; font-size: 15px; font-weight: bold; margin-top: 4px; }
+  .btn-pdf { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 16px; background: var(--sg-primary); color: var(--sg-on-primary); border: none; border-radius: 12px; font-size: 15px; font-weight: bold; margin-top: 4px; }
 
   .place-item { background: var(--sg-sunk); border-radius: 10px; padding: 12px; margin-bottom: 8px; }
   .place-item input { margin-bottom: 8px; }
@@ -163,7 +160,7 @@
   #ss-msg { color: var(--sg-red) !important; }
 </style>
 </head>
-<body>
+<body class="has-tabbar has-actionbar">
 
 <div id="staff-select-screen" class="hidden">
   <div class="ss-title">あなたは誰ですか？</div>
@@ -171,7 +168,7 @@
   <div id="ss-buttons"></div>
 </div>
 
-<div id="main-app" style="display:none;">
+<div id="main-app" class="sg-page" style="display:none;">
 
   <nav class="tabs sg-tabbar" aria-label="画面の切り替え" role="tablist">
     <button type="button" class="tab sg-tab active" id="tab-input" role="tab" aria-selected="true" onclick="switchTab('input')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>入力</button>
@@ -179,22 +176,29 @@
     <button type="button" class="tab sg-tab" id="tab-settings" role="tab" aria-selected="false" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>設定</button>
   </nav>
 
-  <div class="topbar">
+  <header class="sg-head">
     <div>
-      <div class="topbar-name" id="topbar-name">—</div>
-      <div class="topbar-switch" onclick="switchStaff()">別の人に切り替える</div>
+      <div class="sg-eyebrow">Sieg 業務ポータル</div>
+      <h1 class="sg-title">稼働費入力</h1>
+      <div class="sg-sub" id="topbar-month">読み込み中...</div>
     </div>
-    <div class="topbar-month" id="topbar-month">読み込み中...</div>
-  </div>
+    <button type="button" class="sg-who" onclick="switchStaff()" aria-label="別の人に切り替える"><i id="who-initial">?</i><span id="topbar-name">—</span></button>
+  </header>
 
   <div id="load-error" class="load-error" style="display:none;"></div>
+
+  <!-- 送信ボタンは画面の下に固定（入力タブのときだけ。通常／イレギュラーで切り替え） -->
+  <div class="sg-actionbar" id="actionbar">
+    <button class="sg-primary" id="btn-submit-normal" onclick="submitNormal()">送信する</button>
+    <button class="sg-primary" id="btn-submit-irreg" onclick="submitIrregularEntry()" hidden>送信する</button>
+  </div>
 
   <!-- 入力タブ -->
   <div id="page-input" class="page active">
 
     <div class="type-toggle">
-      <button class="type-btn active" id="type-normal" onclick="switchType('normal')">🚗 通常の稼働</button>
-      <button class="type-btn" id="type-irregular" onclick="switchType('irregular')">⚠️ イレギュラー</button>
+      <button class="type-btn active" id="type-normal" onclick="switchType('normal')"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13l2-5h12l2 5v4H4z"/><path d="M6 17v2M18 17v2M4 13h16"/><path d="M8 15h.01M16 15h.01"/></svg> 通常の稼働</button>
+      <button class="type-btn" id="type-irregular" onclick="switchType('irregular')"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 16H3z"/><path d="M12 10v4M12 17h.01"/></svg> イレギュラー</button>
     </div>
 
     <!-- 通常入力 -->
@@ -243,7 +247,6 @@
       </div>
 
       <div class="confirm-line" id="confirm-line" aria-live="polite"></div>
-      <button class="btn-submit" id="btn-submit-normal" onclick="submitNormal()">送信する</button>
       <div id="result" role="status" aria-live="polite"></div>
     </div>
 
@@ -276,7 +279,6 @@
         </div>
       </div>
 
-      <button class="btn-submit" id="btn-submit-irreg" onclick="submitIrregularEntry()">送信する</button>
       <div id="result-irreg" role="status" aria-live="polite"></div>
     </div>
 
@@ -293,7 +295,7 @@
   <!-- 設定タブ -->
   <div id="page-settings" class="page">
     <div class="card">
-      <div class="card-label">📅 対象月の変更</div>
+      <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M3 10h18"/></svg> 対象月の変更</div>
       <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">月を選ぶとその月のカレンダーが再生成されます（入力済みデータはリセットされます）。</p>
       <select id="sel-month" onchange="changeSettingsMonth()">
         <option value="">月を選択</option>
@@ -306,14 +308,14 @@
     </div>
 
     <div class="card">
-      <div class="card-label">📄 PDF保存</div>
+      <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> PDF保存</div>
       <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">今月の稼働費シートをPDFにしてGoogle Driveへ保存します。</p>
-      <button class="btn-pdf" onclick="exportPdf()">📄 PDFをGoogle Driveへ保存</button>
+      <button class="btn-pdf" onclick="exportPdf()"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> PDFをGoogle Driveへ保存</button>
       <div id="pdf-result" style="margin-top:10px;font-size:13px;text-align:center;"></div>
     </div>
 
     <div class="card">
-      <div class="card-label">📍 稼働場所の管理</div>
+      <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg> 稼働場所の管理</div>
       <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">稼働場所の追加・編集・削除ができます（自宅の設定はここには表示されません）。</p>
       <div class="place-add-box place-add-box-top">
         <label class="field-label">新しい場所を追加</label>
@@ -683,6 +685,7 @@
     document.getElementById('staff-select-screen').classList.add('hidden');
     document.getElementById('main-app').style.display = 'block';
     document.getElementById('topbar-name').textContent = currentStaff;
+    document.getElementById('who-initial').textContent = String(currentStaff || '?').charAt(0);
 
     var monthEl = document.getElementById('topbar-month');
     monthEl.textContent = '読み込み中...';
@@ -733,6 +736,16 @@
       document.getElementById('page-'+t).classList.toggle('active', t===tab);
     });
     if (tab === 'confirm') loadEntries();
+    syncActionbar();
+  }
+
+  // 下の送信ボタン：入力タブのときだけ出し、通常／イレギュラーで押すボタンを替える
+  function syncActionbar() {
+    var onInput = document.getElementById('page-input').classList.contains('active');
+    document.getElementById('actionbar').hidden = !onInput;
+    document.body.classList.toggle('has-actionbar', onInput);
+    document.getElementById('btn-submit-normal').hidden = currentType !== 'normal';
+    document.getElementById('btn-submit-irreg').hidden = currentType !== 'irregular';
   }
 
   function switchType(type) {
@@ -741,6 +754,7 @@
     document.getElementById('type-irregular').classList.toggle('active', type==='irregular');
     document.getElementById('section-normal').style.display = (type==='normal') ? 'block' : 'none';
     document.getElementById('section-irregular').style.display = (type==='irregular') ? 'block' : 'none';
+    syncActionbar();
   }
 
   // ===== 稼働場所 =====
