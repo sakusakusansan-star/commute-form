@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>稼働費入力</title>
 <meta name="theme-color" content="#EFF1F4" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C1015" media="(prefers-color-scheme: dark)">
@@ -34,11 +34,12 @@
   }
   .ss-btn:active { background: var(--sg-amber); color: var(--sg-on-primary); }
 
-  /* タブは画面の下（sieg-theme.css の .sg-tabbar） */
+  /* タブは画面の下（sieg-theme.css の .sg-tabbar）。本文も同じ幅で中央に置く（パソコンで開いても横に伸びない） */
+  #main-app { max-width: 560px; margin: 0 auto; }
 
   .topbar { background: var(--sg-surface); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; box-shadow: var(--sg-lift); display: flex; justify-content: space-between; align-items: center; }
   .topbar-name { font-size: 15px; font-weight: 800; color: var(--sg-ink); }
-  .topbar-switch { font-size: 11px; color: var(--sg-faint); text-decoration: underline; margin-top: 2px; }
+  .topbar-switch { font-size: 12px; color: var(--sg-mute); text-decoration: underline; margin-top: 2px; }
   .topbar-month { font-size: 13px; color: var(--sg-mute); text-align: right; }
   .load-error { margin: 10px 14px; padding: 12px 14px; border: 1px solid var(--sg-red); border-radius: 10px;
     background: var(--sg-red-tint); color: var(--sg-red); font-size: 13px; line-height: 1.6; }
@@ -60,7 +61,12 @@
     border-radius: 10px; font-size: 16px; color: var(--sg-ink); background: var(--sg-sunk);
     -webkit-appearance: none; appearance: none;
   }
-  input:focus, select:focus { outline: none; border-color: var(--sg-primary); background: var(--sg-surface); }
+  input:focus, select:focus { outline: none; border-color: var(--sg-primary); background-color: var(--sg-surface); }
+  /* ブラウザの▼を消しているので、自前の▼を描く */
+  select {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' fill='none' stroke='%236B7584' stroke-width='2' stroke-linecap='round'/></svg>");
+    background-repeat: no-repeat; background-position: right 14px center; padding-right: 40px;
+  }
 
   .quick-places { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
   .qp-btn { padding: 13px 4px; border: 2px solid var(--sg-hair); border-radius: 10px; background: var(--sg-sunk); font-size: 13px; font-weight: 700; color: var(--sg-ink2); }
@@ -70,7 +76,7 @@
   .cal-nav { background: var(--sg-sunk); border: none; border-radius: 10px; width: 44px; height: 40px; font-size: 16px; color: var(--sg-blue); font-weight: 700; }
   .cal-title { font-size: 15px; font-weight: 800; color: var(--sg-blue); }
   .cal-dow-grid, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
-  .cal-dow { text-align: center; font-size: 10px; color: var(--sg-faint); padding: 4px 0; font-weight: 700; }
+  .cal-dow { text-align: center; font-size: 11px; color: var(--sg-mute); padding: 4px 0; font-weight: 700; }
   .cal-dow.sat { color: var(--sg-sat); } .cal-dow.sun { color: var(--sg-red); }
   .cal-day { text-align: center; font-size: 15px; font-weight: 600; border-radius: 8px; color: var(--sg-ink); min-height: 42px; display: flex; align-items: center; justify-content: center; position: relative; }
   .cal-day.sat { color: var(--sg-sat); } .cal-day.sun { color: var(--sg-red); }
@@ -83,7 +89,7 @@
   .cal-day.on { background: var(--sg-primary); color: var(--sg-on-primary); font-weight: 800; }
   .cal-day.on.filled::after { background: var(--sg-on-primary); }
   .btn-clear-days { display: block; margin: 8px auto 0; padding: 6px 14px; border: 1px solid var(--sg-hair); border-radius: 999px; background: var(--sg-surface); color: var(--sg-mute); font-size: 13px; font-weight: 700; }
-  .range-info { text-align: center; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--sg-faint); min-height: 18px; }
+  .range-info { text-align: center; margin-top: 8px; font-size: 13px; font-weight: 700; color: var(--sg-mute); min-height: 18px; }
   .range-info.set { color: var(--sg-blue); }
 
   .hw-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -91,18 +97,29 @@
   .hw-btn.active { border-color: var(--sg-primary); background: var(--sg-blue-tint); color: var(--sg-ink); }
   .toll-fields { display: none; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
   .toll-fields.show { display: grid; }
-  .field-label { font-size: 11px; color: var(--sg-faint); margin-bottom: 6px; display: block; }
+  .field-label { font-size: 12px; color: var(--sg-mute); margin-bottom: 6px; display: block; }
 
   .estimate-box { background: var(--sg-blue-tint); border-radius: 10px; padding: 12px 14px; text-align: center; margin: 10px 0; }
   .estimate-label { font-size: 11px; color: var(--sg-mute); margin-bottom: 2px; }
   .estimate-val { font-size: 20px; font-weight: 800; color: var(--sg-ink); }
 
   .btn-submit { width: 100%; padding: 16px; background: var(--sg-primary); color: var(--sg-on-primary); border: none; border-radius: 12px; font-size: 16px; font-weight: 800; min-height: 54px; margin-top: 4px; }
-  .btn-submit:active { background: var(--sg-primary); }
+  .btn-submit { transition: transform .06s, filter .12s; }
+  .btn-submit:active { filter: brightness(.88); transform: scale(.985); }
+  .btn-submit:disabled { opacity: .5; transform: none; filter: none; }
+  .req { font-size: 10px; font-weight: 800; color: var(--sg-red); background: var(--sg-red-tint); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
+  .cal-legend { display: flex; justify-content: center; gap: 14px; margin-top: 6px; font-size: 11.5px; color: var(--sg-mute); }
+  .cal-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--sg-green); margin-right: 5px; vertical-align: 1px; }
+  .cal-legend b { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--sg-primary); margin-right: 5px; vertical-align: -1px; }
+  .cal-grid.loading { opacity: .4; pointer-events: none; }
+  .cal-today { background: var(--sg-sunk); border: none; border-radius: 999px; padding: 8px 14px; min-height: 36px; font-size: 12px; font-weight: 700; color: var(--sg-blue); }
+  .cal-today[hidden] { display: none; }
+  .confirm-line { margin: 2px 2px 10px; padding: 10px 12px; border-radius: 10px; background: var(--sg-blue-tint); color: var(--sg-ink2); font-size: 13px; line-height: 1.55; }
+  .confirm-line:empty { display: none; }
   #result { text-align: center; font-size: 14px; font-weight: 700; min-height: 18px; margin-top: 10px; }
   .success { color: var(--sg-green); } .error-msg { color: var(--sg-red); }
 
-  .irreg-note { font-size: 12px; color: var(--sg-faint); margin-bottom: 10px; text-align: right; }
+  .irreg-note { font-size: 12px; color: var(--sg-mute); margin-bottom: 10px; text-align: right; }
 
   .entry-item { border-left: 4px solid var(--sg-primary); border-radius: 0 10px 10px 0; background: var(--sg-sunk); padding: 12px 14px; margin-bottom: 8px; }
   .entry-item.irregular { border-color: var(--sg-red); }
@@ -115,8 +132,8 @@
   .entry-date { font-size: 13px; font-weight: 800; color: var(--sg-blue); }
   .entry-amount { font-size: 15px; font-weight: 800; color: var(--sg-ink); }
   .entry-detail { font-size: 13px; color: var(--sg-ink2); }
-  .btn-del { font-size: 12px; color: var(--sg-red); background: none; border: none; margin-top: 6px; padding: 4px; }
-  .empty-msg { text-align: center; color: var(--sg-faint); font-size: 14px; padding: 30px 0; }
+  .btn-del { font-size: 13px; font-weight: 700; color: var(--sg-red); background: var(--sg-red-tint); border: none; border-radius: 8px; margin-top: 8px; min-height: 40px; padding: 8px 14px; display: inline-flex; align-items: center; }
+  .empty-msg { text-align: center; color: var(--sg-mute); font-size: 14px; padding: 30px 0; }
 
   .btn-pdf { width: 100%; padding: 16px; background: var(--sg-primary); color: var(--sg-on-primary); border: none; border-radius: 12px; font-size: 15px; font-weight: bold; margin-top: 4px; }
 
@@ -156,10 +173,10 @@
 
 <div id="main-app" style="display:none;">
 
-  <nav class="tabs sg-tabbar" aria-label="画面の切り替え">
-    <button type="button" class="tab sg-tab active" id="tab-input" onclick="switchTab('input')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>入力</button>
-    <button type="button" class="tab sg-tab" id="tab-confirm" onclick="switchTab('confirm')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>確認・修正</button>
-    <button type="button" class="tab sg-tab" id="tab-settings" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>設定</button>
+  <nav class="tabs sg-tabbar" aria-label="画面の切り替え" role="tablist">
+    <button type="button" class="tab sg-tab active" id="tab-input" role="tab" aria-selected="true" onclick="switchTab('input')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>入力</button>
+    <button type="button" class="tab sg-tab" id="tab-confirm" role="tab" aria-selected="false" onclick="switchTab('confirm')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>確認・修正</button>
+    <button type="button" class="tab sg-tab" id="tab-settings" role="tab" aria-selected="false" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>設定</button>
   </nav>
 
   <div class="topbar">
@@ -183,25 +200,26 @@
     <!-- 通常入力 -->
     <div id="section-normal">
       <div class="card">
-        <div class="card-label">日付（とびとびでも、まとめて選べます）</div>
+        <div class="card-label">日付<span class="req">必須</span>（とびとびでも、まとめて選べます）</div>
+        <!-- 登録先のシートは1か月分なので、カレンダーはその月だけ（月を変えるときは「設定」から） -->
         <div class="cal-header">
-          <button class="cal-nav" onclick="changeMonth(-1)">◀</button>
-          <span class="cal-title" id="calTitle"></span>
-          <button class="cal-nav" onclick="changeMonth(1)">▶</button>
+          <span class="cal-title" id="calTitle">読み込み中…</span>
+          <button type="button" class="cal-today" id="cal-today" onclick="pickToday()" hidden>今日</button>
         </div>
         <div class="cal-dow-grid">
           <div class="cal-dow">月</div><div class="cal-dow">火</div><div class="cal-dow">水</div>
           <div class="cal-dow">木</div><div class="cal-dow">金</div>
           <div class="cal-dow sat">土</div><div class="cal-dow sun">日</div>
         </div>
-        <div class="cal-grid" id="calGrid"></div>
+        <div class="cal-grid loading" id="calGrid"></div>
         <div class="range-info" id="rangeInfo">日付をタップ</div>
+        <div class="cal-legend"><span><i></i>入力済み</span><span><b></b>選んでいる日</span></div>
       </div>
 
       <div class="card">
-        <div class="card-label">稼働場所</div>
+        <div class="card-label">稼働場所<span class="req">必須</span></div>
         <div class="quick-places" id="quick-places"></div>
-        <select id="place-select" onchange="onPlaceSelectChange()">
+        <select id="place-select" onchange="onPlaceSelectChange()" aria-label="その他の稼働場所">
           <option value="">その他の場所を選ぶ…</option>
         </select>
       </div>
@@ -214,18 +232,19 @@
         </div>
         <div class="toll-fields" id="toll-fields">
           <div>
-            <label class="field-label">高速代（行き）</label>
-            <input type="number" id="toll-go" placeholder="円" inputmode="numeric">
+            <label class="field-label" for="toll-go">高速代（行き・1日あたり）</label>
+            <input type="number" id="toll-go" placeholder="円" inputmode="numeric" oninput="updateConfirmLine()">
           </div>
           <div>
-            <label class="field-label">高速代（帰り）</label>
-            <input type="number" id="toll-back" placeholder="円" inputmode="numeric">
+            <label class="field-label" for="toll-back">高速代（帰り・1日あたり）</label>
+            <input type="number" id="toll-back" placeholder="円" inputmode="numeric" oninput="updateConfirmLine()">
           </div>
         </div>
       </div>
 
-      <button class="btn-submit" onclick="submitNormal()">送信する</button>
-      <div id="result"></div>
+      <div class="confirm-line" id="confirm-line" aria-live="polite"></div>
+      <button class="btn-submit" id="btn-submit-normal" onclick="submitNormal()">送信する</button>
+      <div id="result" role="status" aria-live="polite"></div>
     </div>
 
     <!-- イレギュラー入力 -->
@@ -233,11 +252,9 @@
       <div class="irreg-note" id="irreg-capacity">枠: -/-</div>
 
       <div class="card">
-        <div class="card-label">日付</div>
+        <div class="card-label">日付<span class="req">必須</span></div>
         <div class="cal-header">
-          <button class="cal-nav" onclick="changeMonthIrreg(-1)">◀</button>
-          <span class="cal-title" id="calTitleIrreg"></span>
-          <button class="cal-nav" onclick="changeMonthIrreg(1)">▶</button>
+          <span class="cal-title" id="calTitleIrreg">読み込み中…</span>
         </div>
         <div class="cal-dow-grid">
           <div class="cal-dow">月</div><div class="cal-dow">火</div><div class="cal-dow">水</div>
@@ -249,18 +266,18 @@
       </div>
 
       <div class="card">
-        <div class="card-label">内容</div>
+        <label class="card-label" for="irreg-content" style="display:block">内容<span class="req">必須</span></label>
         <input type="text" id="irreg-content" placeholder="例: 稼働場所変更">
-        <label class="field-label" style="margin-top:12px;">距離（km）</label>
+        <label class="field-label" for="irreg-distance" style="margin-top:12px;">距離（km）</label>
         <input type="number" id="irreg-distance" placeholder="例: 30" inputmode="decimal" oninput="updateIrregEstimate()">
         <div class="estimate-box">
-          <div class="estimate-label">自動計算される金額（距離 × 15円/km）</div>
+          <div class="estimate-label" id="irreg-rate-label">自動計算される金額（距離 × 15円/km）</div>
           <div class="estimate-val" id="irreg-estimate">¥0</div>
         </div>
       </div>
 
-      <button class="btn-submit" onclick="submitIrregularEntry()">送信する</button>
-      <div id="result-irreg"></div>
+      <button class="btn-submit" id="btn-submit-irreg" onclick="submitIrregularEntry()">送信する</button>
+      <div id="result-irreg" role="status" aria-live="polite"></div>
     </div>
 
   </div>
@@ -338,6 +355,8 @@
   var currentType = 'normal';
 
   var calYear, calMonth;
+  // イレギュラーの金額の目安（1kmあたり）。GAS の CONFIG.ratePerKm と同じ値にしておく
+  var RATE_PER_KM = 15;
   var picked = {};   // 通常の稼働で選んだ日 { 日: true }。送るときに続いた日ごとにまとめる
   var calYearIrreg, calMonthIrreg, dayIrreg = null;
 
@@ -559,7 +578,7 @@
       return;
     }
     // 交通費を使ったことがない端末では、ポータルで選んだ名前（苗字）を正式名にして使う
-    currentStaff = localStorage.getItem(STAFF_KEY) || SiegNav.staff(Object.keys(STAFF_ALIASES));
+    currentStaff = localStorage.getItem(STAFF_KEY) || (window.SiegNav ? SiegNav.staff(Object.keys(STAFF_ALIASES)) : '');
     if (currentStaff) {
       currentStaff = resolveAlias(currentStaff);
       startApp();
@@ -668,6 +687,15 @@
     var monthEl = document.getElementById('topbar-month');
     monthEl.textContent = '読み込み中...';
     hideLoadError();
+    document.getElementById('irreg-rate-label').textContent = '自動計算される金額（距離 × ' + RATE_PER_KM + '円/km）';
+
+    // 読み込みを待つあいだも、今月のカレンダーの形だけ先に出しておく（押せない状態で薄く）
+    if (!monthInfo) {
+      var now = new Date();
+      calYear = now.getFullYear(); calMonth = now.getMonth() + 1;
+      renderCal();
+      document.getElementById('calTitle').textContent = '読み込み中…';
+    }
 
     // 月情報と場所一覧は1リクエストにまとめる。別々に投げるとGASの実行が
     // 2本並行して走り、初回読み込みがタイムアウトしやすい。
@@ -681,6 +709,9 @@
 
       calYear = monthInfo.year; calMonth = monthInfo.month;
       calYearIrreg = monthInfo.year; calMonthIrreg = monthInfo.month;
+      document.getElementById('calGrid').classList.remove('loading');
+      var today = new Date();
+      document.getElementById('cal-today').hidden = !(today.getFullYear() === calYear && today.getMonth() + 1 === calMonth);
       renderCal();
       renderCalIrreg();
       renderQuickPlaces();
@@ -698,6 +729,7 @@
   function switchTab(tab) {
     ['input','confirm','settings'].forEach(function(t) {
       document.getElementById('tab-'+t).classList.toggle('active', t===tab);
+      document.getElementById('tab-'+t).setAttribute('aria-selected', String(t===tab));
       document.getElementById('page-'+t).classList.toggle('active', t===tab);
     });
     if (tab === 'confirm') loadEntries();
@@ -741,6 +773,7 @@
     document.querySelectorAll('.qp-btn').forEach(function(b) { b.classList.remove('selected'); });
     if (btnEl) btnEl.classList.add('selected');
     document.getElementById('place-select').value = '';
+    updateConfirmLine();
   }
 
   function onPlaceSelectChange() {
@@ -749,6 +782,7 @@
       selectedPlace = v;
       document.querySelectorAll('.qp-btn').forEach(function(b) { b.classList.remove('selected'); });
     }
+    updateConfirmLine();
   }
 
   // ===== 高速 =====
@@ -757,6 +791,31 @@
     document.getElementById('hw-none').classList.toggle('active', v === '無');
     document.getElementById('hw-yes').classList.toggle('active', v === '有');
     document.getElementById('toll-fields').classList.toggle('show', v === '有');
+    updateConfirmLine();
+  }
+
+  // 送る前に「何が登録されるか」を1行で見せる
+  function updateConfirmLine() {
+    var el = document.getElementById('confirm-line');
+    var days = pickedDays();
+    if (!days.length && !selectedPlace) { el.textContent = ''; return; }
+    var parts = [];
+    parts.push(days.length ? calMonth + '月' + rangesText(toRanges(days)) + '（' + days.length + '日）' : '日付：未選択');
+    parts.push(selectedPlace || '稼働場所：未選択');
+    if (selectedHighway === '有') {
+      var g = Number(document.getElementById('toll-go').value) || 0, b = Number(document.getElementById('toll-back').value) || 0;
+      parts.push('高速あり（1日 行き¥' + g.toLocaleString() + '・帰り¥' + b.toLocaleString() + '）');
+    } else {
+      parts.push('高速なし');
+    }
+    el.textContent = '送る内容：' + parts.join(' ／ ');
+  }
+
+  // 今日を選ぶ（もう選んであれば外す）
+  function pickToday() {
+    var d = new Date().getDate();
+    if (picked[d]) delete picked[d]; else picked[d] = true;
+    afterPick();
   }
 
   // ===== カレンダー（通常：タップで1日ずつ・なぞるとまとめて） =====
@@ -836,6 +895,7 @@
       el.className = 'range-info';
       el.textContent = '日付をタップ（続いた日は横になぞるとまとめて選べます）';
     }
+    updateConfirmLine();
   }
 
   function afterPick() {
@@ -949,7 +1009,7 @@
 
   function updateIrregEstimate() {
     var km = Number(document.getElementById('irreg-distance').value) || 0;
-    document.getElementById('irreg-estimate').textContent = '¥' + Math.round(km * 15).toLocaleString();
+    document.getElementById('irreg-estimate').textContent = '¥' + Math.round(km * RATE_PER_KM).toLocaleString();
   }
 
   // ===== 送信：通常 =====
@@ -973,6 +1033,9 @@
       tollBack: document.getElementById('toll-back').value
     };
     var sent = [], days = 0;
+    var btn = document.getElementById('btn-submit-normal');
+    btn.disabled = true; btn.textContent = '送信中…';
+    function release() { btn.disabled = false; btn.textContent = '送信する'; }
     resultEl.className = ''; resultEl.textContent = '送信中...';
 
     ranges.reduce(function(prev, r) {
@@ -988,6 +1051,7 @@
         });
       });
     }, Promise.resolve()).then(function() {
+      release();
       resultEl.className = 'success';
       resultEl.textContent = '✅ ' + calMonth + '月' + rangesText(sent) + '（' + days + '日分）を登録しました';
       if (navigator.vibrate) navigator.vibrate([30,50,30]);
@@ -996,6 +1060,7 @@
       document.getElementById('toll-back').value = '';
       refreshMonth();
     }, function(err) {
+      release();
       if (!sent.length) return showErr(resultEl, err.message);
       showErr(resultEl, calMonth + '月' + rangesText(sent) + ' は登録できました。' +
         '残りの ' + rangesText(toRanges(pickedDays())) + ' は送れませんでした（' + err.message + '）。' +
@@ -1020,12 +1085,16 @@
     if (!dayIrreg) { showErr(resultEl, '日付を選択してください'); return; }
     if (!content) { showErr(resultEl, '内容を入力してください'); return; }
 
+    var btn = document.getElementById('btn-submit-irreg');
+    btn.disabled = true; btn.textContent = '送信中…';
+    function release() { btn.disabled = false; btn.textContent = '送信する'; }
     resultEl.className = ''; resultEl.textContent = '送信中...';
 
     callApi('submitIrregular', {
       staffName: currentStaff,
       data: { day: dayIrreg, content: content, distanceKm: distance }
     }).then(function(res) {
+      release();
       resultEl.className = 'success';
       resultEl.textContent = '✅ 登録しました（¥' + Number(res.amount).toLocaleString() + '）';
       document.getElementById('irreg-content').value = '';
@@ -1039,6 +1108,7 @@
         document.getElementById('irreg-capacity').textContent = '枠: ' + info.irregularCount + '/' + info.irregularCapacity;
       });
     }).catch(function(err) {
+      release();
       showErr(resultEl, err.message);
     });
   }
@@ -1047,12 +1117,16 @@
     el.className = 'error-msg';
     el.textContent = '⚠️ ' + msg;
     if (navigator.vibrate) navigator.vibrate(80);
+    // ボタンの下が画面の外だと気づけないので、見える位置まで動かす
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }
 
   // ===== 確認・修正 =====
   function loadEntries() {
     var listEl = document.getElementById('entry-list');
     listEl.innerHTML = '<div class="empty-msg">読み込み中...</div>';
+    // 一覧はシートの月の分（GAS の getMyEntries はシートの月だけを返す）
+    var sheetMonth = monthInfo ? monthInfo.month : calMonth;
     callApi('getMyEntries', { staffName: currentStaff }).then(function(entries) {
       if (!entries || entries.length === 0) {
         listEl.innerHTML = '<div class="empty-msg">まだ入力がありません</div>';
@@ -1070,13 +1144,13 @@
       entries.forEach(function(e) {
         if (e.type === 'normal') {
           html += '<div class="entry-item">';
-          html += '<div class="entry-top"><span class="entry-date">' + calMonth + '/' + e.day + '</span><span class="entry-amount">¥' + Number(e.amount||0).toLocaleString() + '</span></div>';
+          html += '<div class="entry-top"><span class="entry-date">' + sheetMonth + '/' + e.day + '</span><span class="entry-amount">¥' + Number(e.amount||0).toLocaleString() + '</span></div>';
           html += '<div class="entry-detail">' + e.place + (e.highway === '有' ? '（高速あり）' : '') + '</div>';
           html += '<button class="btn-del" onclick="deleteNormal(' + e.day + ')">削除</button>';
           html += '</div>';
         } else {
           html += '<div class="entry-item irregular">';
-          html += '<div class="entry-top"><span class="entry-date">' + calMonth + '/' + (e.day||'?') + '（イレギュラー）</span><span class="entry-amount">¥' + Number(e.amount||0).toLocaleString() + '</span></div>';
+          html += '<div class="entry-top"><span class="entry-date">' + sheetMonth + '/' + (e.day||'?') + '（イレギュラー）</span><span class="entry-amount">¥' + Number(e.amount||0).toLocaleString() + '</span></div>';
           html += '<div class="entry-detail">' + e.content + (e.note ? '（' + e.note + '）' : '') + '</div>';
           html += '<button class="btn-del" onclick="deleteIrregular(' + e.row + ')">削除</button>';
           html += '</div>';
@@ -1089,7 +1163,7 @@
   }
 
   function deleteNormal(day) {
-    if (!confirm(calMonth + '月' + day + '日の入力を削除しますか？')) return;
+    if (!confirm((monthInfo ? monthInfo.month : calMonth) + '月' + day + '日の入力を削除しますか？')) return;
     callApi('deleteNormalEntry', { staffName: currentStaff, day: day }).then(function() {
       loadEntries();
       callApi('getMonthInfo', { staffName: currentStaff }).then(function(info) { monthInfo = info; });
