@@ -106,6 +106,11 @@
 
   .entry-item { border-left: 4px solid var(--sg-primary); border-radius: 0 10px 10px 0; background: var(--sg-sunk); padding: 12px 14px; margin-bottom: 8px; }
   .entry-item.irregular { border-color: var(--sg-red); }
+  .entry-total { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: var(--sg-primary); color: var(--sg-on-primary); border-radius: var(--sg-r-sm); padding: 14px 16px; margin-bottom: 12px; }
+  .entry-total-k { font-size: 13px; font-weight: 700; opacity: .85; }
+  .entry-total-sub { font-size: 12px; opacity: .7; margin-top: 2px; }
+  .entry-total-v { font-size: 26px; font-weight: 900; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
   .entry-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
   .entry-date { font-size: 13px; font-weight: 800; color: var(--sg-blue); }
   .entry-amount { font-size: 15px; font-weight: 800; color: var(--sg-ink); }
@@ -1053,7 +1058,15 @@
         listEl.innerHTML = '<div class="empty-msg">まだ入力がありません</div>';
         return;
       }
-      var html = '';
+      // 今月の合計（シートの合計行と同じく、全部足してから円に丸める）
+      var sum = 0, nNormal = 0, nIrreg = 0;
+      entries.forEach(function(e) {
+        sum += Number(e.amount) || 0;
+        if (e.type === 'normal') nNormal++; else nIrreg++;
+      });
+      var html = '<div class="entry-total"><div><div class="entry-total-k">今月の合計</div>'
+        + '<div class="entry-total-sub">稼働 ' + nNormal + '日' + (nIrreg ? '・イレギュラー ' + nIrreg + '件' : '') + '</div></div>'
+        + '<div class="entry-total-v">¥' + Math.round(sum).toLocaleString() + '</div></div>';
       entries.forEach(function(e) {
         if (e.type === 'normal') {
           html += '<div class="entry-item">';
