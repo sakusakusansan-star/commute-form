@@ -104,7 +104,7 @@ const SHORT_NAMES = ['福山', '古川', '清田', '福岡', '山口', '鈴木',
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
 // コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
-const CODE_VERSION = '2026-11-02';
+const CODE_VERSION = '2026-11-02b';
 
 // ── 年の判定 ─────────────────────────────────────────────────
 // 以前は年を 2026 に固定していたため、年をまたぐと
@@ -735,6 +735,8 @@ function doPost(e) {
       data = resetMonthWeb(req.staffName, req.month);
     } else if (action === 'exportPdf') {
       data = exportCommutePdf(req.staffName);
+    } else if (action === 'saveAttachment') {
+      data = saveAttachmentWeb(req.staffName, req.kind, req.index, req.mimeType, req.data);
     } else {
       throw new Error('不明なaction: ' + action);
     }
@@ -1129,6 +1131,44 @@ function exportCommutePdf(staffName) {
   targetFolder.createFile(pdfBlob);
 
   return '保存完了';
+}
+
+// ── 添付（ETCの利用明細など）を稼働費PDFと同じ月フォルダに保存 ──
+// 例：2026-10_山口_ETC.pdf、2枚目からは 2026-10_山口_ETC_2.jpg
+// 1枚目を受け取ったときに、その月・その人の同じ種類の古い添付をゴミ箱へ移すので、
+// 送り直しても前の分と混ざらない（同じ番号で送り直しても1つのまま）。
+var ATTACH_KINDS = { ETC: 'ETC' };
+var ATTACH_TYPES = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
+var ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+
+function saveAttachmentWeb(staffName, kind, index, mimeType, base64) {
+  var label = ATTACH_KINDS[kind];
+  if (!label) throw new Error('添付の種類が分かりません: ' + kind);
+  var ext = ATTACH_TYPES[mimeType];
+  if (!ext) throw new Error('PDFか写真（JPEG・PNG）を添付してください。');
+  index = Number(index);
+  if (!(index >= 1 && index <= 20 && Math.floor(index) === index)) throw new Error('添付の番号が正しくありません。');
+  var bytes = Utilities.base64Decode(String(base64 || ''));
+  if (!bytes.length) throw new Error('添付ファイルが空です。');
+  if (bytes.length > ATTACH_MAX_BYTES) throw new Error('添付ファイルが大きすぎます（10MBまで）。');
+
+  var sheet = getCommuteSheet(staffName);
+  var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+  var year = sheetYear_(sheet, month);
+  var folder = pdfMonthFolder_(staffName, year, month);
+  var base = pdfFileName_(staffName, year, month, label).replace(/\.pdf$/, '');
+  var name = base + (index > 1 ? '_' + index : '') + '.' + ext;
+
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var f = files.next();
+    var n = f.getName();
+    var sameKind = n.indexOf(base + '.') === 0 || n.indexOf(base + '_') === 0;
+    var sameIndex = n.replace(/\.[^.]+$/, '') === name.replace(/\.[^.]+$/, '');
+    if (sameKind && (index === 1 || sameIndex)) f.setTrashed(true);
+  }
+  folder.createFile(Utilities.newBlob(bytes, mimeType, name));
+  return { name: name };
 }
 
 function shortName_(name) {

@@ -154,6 +154,19 @@
   .ss-btn:active { background: var(--sg-primary); color: var(--sg-on-primary); }
   body { padding-bottom: calc(30px + var(--sg-tabbar-h)); }
   .card, .topbar { border-radius: var(--sg-r); }
+  .attach-box { margin-bottom: 12px; }
+  .btn-pdf:disabled { opacity: .6; }
+  .btn-attach { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; padding: 13px; background: var(--sg-sunk); color: var(--sg-ink); border: 1.5px dashed var(--sg-hair); border-radius: var(--sg-r-sm); font-size: 14px; font-weight: bold; cursor: pointer; }
+  .btn-attach:active { background: var(--sg-hair2); }
+  .attach-list { list-style: none; margin: 8px 0 0; padding: 0; }
+  .attach-list li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--sg-sunk); border-radius: 10px; margin-top: 6px; font-size: 13px; }
+  .attach-list .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach-list .sz { color: var(--sg-mute); font-size: 12px; flex: none; }
+  .attach-list .st { flex: none; font-size: 12px; }
+  .attach-list .st.ok { color: var(--sg-green); } .attach-list .st.ng { color: var(--sg-red); }
+  .attach-list button { flex: none; border: none; background: none; color: var(--sg-mute); font-size: 18px; line-height: 1; padding: 2px 6px; cursor: pointer; }
+  .attach-msg { font-size: 12px; color: var(--sg-red); margin-top: 6px; text-align: center; }
+  .attach-msg:empty { display: none; }
   .type-btn, .qp-btn, .hw-btn, input[type="text"], input[type="number"], select, .btn-submit, .btn-pdf { border-radius: var(--sg-r-sm); }
   .type-btn.active, .qp-btn.selected, .hw-btn.active { background: var(--sg-primary); border-color: var(--sg-primary); color: var(--sg-on-primary); }
   .cal-day.in-range { color: var(--sg-ink); }
@@ -309,8 +322,14 @@
 
     <div class="card">
       <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> PDF保存</div>
-      <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">今月の稼働費シートをPDFにしてGoogle Driveへ保存します。</p>
-      <button class="btn-pdf" onclick="exportPdf()"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> PDFをGoogle Driveへ保存</button>
+      <p style="font-size:13px;color:var(--sg-mute);margin-bottom:12px;">今月の稼働費シートをPDFにしてGoogle Driveへ保存します。高速代がある月は、ETCの利用明細も添付すると同じ月のフォルダに一緒に保存されます。</p>
+      <div class="attach-box">
+        <label class="btn-attach" for="etc-input"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> ETCの利用明細を添付（PDF・写真）</label>
+        <input type="file" id="etc-input" accept="application/pdf,image/*" multiple onchange="onEtcSelected(this)" hidden>
+        <ul id="etc-list" class="attach-list"></ul>
+        <div id="etc-msg" class="attach-msg"></div>
+      </div>
+      <button class="btn-pdf" id="btn-pdf" onclick="exportPdf()"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> <span id="btn-pdf-label">PDFをGoogle Driveへ保存</span></button>
       <div id="pdf-result" style="margin-top:10px;font-size:13px;text-align:center;"></div>
     </div>
 
@@ -374,7 +393,9 @@
     getPlaceList: true, getPlaceListManage: true, getMyEntries: true,
     // 日付・行を指定して上書き／消去するだけなので、2回走っても結果は同じ
     submitCommute: true, deleteNormalEntry: true, deleteIrregularEntry: true,
-    updatePlace: true, resetMonth: true
+    updatePlace: true, resetMonth: true,
+    // 添付は番号ごとの名前で上書きするので、送り直しても増えない
+    saveAttachment: true
     // submitIrregular（空き行へ追加）・addPlace（行を追加）・deletePlace（行が詰まる）・
     // exportPdf（PDFが増える）は2回走ると結果が変わるため、ここには入れない。
   };
@@ -1225,15 +1246,123 @@
     });
   }
 
+  // ===== ETCの利用明細の添付 =====
+  // 写真は長い辺 2000px の JPEG に縮めて送る（明細の細かい文字が読める大きさ）。PDFはそのまま。
+  var ATTACH_MAX_SIDE = 2000, ATTACH_JPEG_QUALITY = 0.85;
+  var ATTACH_MAX_BYTES = 10 * 1024 * 1024, ATTACH_MAX_COUNT = 10;
+  var etcFiles = [];   // { name, size, mimeType, data(base64), state: ''|'ok'|'ng' }
+  var pdfBusy = false;
+
+  function onEtcSelected(input) {
+    var msg = document.getElementById('etc-msg');
+    msg.textContent = '';
+    document.getElementById('pdf-result').textContent = '';
+    var picked = Array.prototype.slice.call(input.files || []);
+    input.value = '';
+    if (etcFiles.length + picked.length > ATTACH_MAX_COUNT) {
+      msg.textContent = '添付は' + ATTACH_MAX_COUNT + '件までです。';
+      picked = picked.slice(0, Math.max(0, ATTACH_MAX_COUNT - etcFiles.length));
+    }
+    picked.reduce(function(p, file) {
+      return p.then(function() {
+        return readAttachment(file).then(function(item) {
+          etcFiles.push(item);
+          renderEtcList();
+        }).catch(function(err) {
+          msg.textContent = file.name + '：' + err.message;
+        });
+      });
+    }, Promise.resolve());
+  }
+
+  function readAttachment(file) {
+    return new Promise(function(resolve, reject) {
+      var isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      if (!isPdf && !/^image\//.test(file.type)) { reject(new Error('PDFか写真を選んでください。')); return; }
+      if (isPdf && file.size > ATTACH_MAX_BYTES) { reject(new Error('10MBより大きいPDFは添付できません。')); return; }
+      function done(name, type, url) {
+        try { resolve(attachItem(name, type, url)); } catch (e) { reject(e); }
+      }
+      var reader = new FileReader();
+      reader.onerror = function() { reject(new Error('ファイルを読み込めませんでした。')); };
+      reader.onload = function(e) {
+        var dataUrl = e.target.result;
+        if (isPdf) { done(file.name, 'application/pdf', dataUrl); return; }
+        var img = new Image();
+        img.onload = function() {
+          var scale = Math.min(1, ATTACH_MAX_SIDE / Math.max(img.width, img.height));
+          var canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          done(file.name, 'image/jpeg', canvas.toDataURL('image/jpeg', ATTACH_JPEG_QUALITY));
+        };
+        img.onerror = function() { reject(new Error('この写真の形式は読み込めませんでした。スクリーンショットかPDFでお試しください。')); };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function attachItem(name, mimeType, dataUrl) {
+    var data = dataUrl.split(',')[1] || '';
+    var size = Math.floor(data.length * 3 / 4);
+    if (size > ATTACH_MAX_BYTES) throw new Error('10MBより大きいので添付できません。');
+    return { name: name, size: size, mimeType: mimeType, data: data, state: '' };
+  }
+
+  function removeEtc(i) {
+    if (pdfBusy) return;
+    etcFiles.splice(i, 1);
+    renderEtcList();
+  }
+
+  function renderEtcList() {
+    var ul = document.getElementById('etc-list');
+    ul.innerHTML = etcFiles.map(function(f, i) {
+      var kb = f.size < 1024 * 1024 ? Math.max(1, Math.round(f.size / 1024)) + 'KB' : (f.size / 1024 / 1024).toFixed(1) + 'MB';
+      var st = f.state === 'ok' ? '<span class="st ok">保存済み</span>' : f.state === 'ng' ? '<span class="st ng">失敗</span>' : '';
+      return '<li><span class="nm">' + escapeHtml(f.name) + '</span><span class="sz">' + kb + '</span>' + st
+        + '<button type="button" aria-label="' + escapeHtml(f.name) + 'を外す" onclick="removeEtc(' + i + ')">×</button></li>';
+    }).join('');
+    document.getElementById('btn-pdf-label').textContent = etcFiles.length
+      ? 'PDFとETC明細（' + etcFiles.length + '件）を保存'
+      : 'PDFをGoogle Driveへ保存';
+  }
+
   function exportPdf() {
+    if (pdfBusy) return;
     var el = document.getElementById('pdf-result');
-    el.style.color = 'var(--sg-mute)'; el.textContent = '保存中...';
-    callApi('exportPdf', { staffName: currentStaff }, 60000).then(function(msg) {
+    var btn = document.getElementById('btn-pdf');
+    var files = etcFiles.slice();
+    pdfBusy = true; btn.disabled = true;
+    files.forEach(function(f) { f.state = ''; });
+    renderEtcList();
+    el.style.color = 'var(--sg-mute)'; el.textContent = '稼働費のPDFを保存中...';
+    callApi('exportPdf', { staffName: currentStaff }, 60000).then(function() {
+      // 添付は1件ずつ送る（まとめると大きくなりすぎて通信が切れやすい）
+      return files.reduce(function(p, f, i) {
+        return p.then(function() {
+          el.textContent = '稼働費のPDFを保存しました。ETC明細を保存中...（' + (i + 1) + '/' + files.length + '）';
+          return callApi('saveAttachment', { staffName: currentStaff, kind: 'ETC', index: i + 1, mimeType: f.mimeType, data: f.data }, 90000)
+            .then(function() { f.state = 'ok'; renderEtcList(); })
+            .catch(function(err) {
+              f.state = 'ng'; renderEtcList();
+              throw new Error('稼働費のPDFは保存しました。ETC明細の' + (i + 1) + '件目で失敗しました：' + err.message
+                + '（もう一度「保存」を押すと、PDFとETC明細をまとめて保存し直します）');
+            });
+        });
+      }, Promise.resolve());
+    }).then(function() {
       el.style.color = 'var(--sg-green)';
-      el.textContent = '✅ ' + msg;
+      el.textContent = files.length ? '✅ 保存完了（稼働費のPDFとETC明細' + files.length + '件）' : '✅ 保存完了';
+      etcFiles = [];
+      renderEtcList();
     }).catch(function(err) {
       el.style.color = 'var(--sg-red)';
       el.textContent = '❌ ' + err.message;
+    }).then(function() {
+      pdfBusy = false; btn.disabled = false;
     });
   }
 
