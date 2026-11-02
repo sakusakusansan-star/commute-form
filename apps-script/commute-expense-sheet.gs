@@ -26,7 +26,7 @@
 //
 //  【Web入力フォーム（GitHub Pages）対応】
 //  ・doPost経由でスプレッドシートを直接触らずに入力できる関数群を追加
-//  ・PDF保存先フォルダIDは PDF_ROOT_FOLDER_ID に設定済み
+//  ・PDFは経費精算フォルダの「社員」「パートナー」に年・月で分けて保存（PDF_FOLDER_ID）
 //  ・稼働場所の追加・編集・削除もWebフォームから可能
 //
 //  【Webフォームで「Unexpected token '<'」が出る場合】
@@ -87,13 +87,24 @@ const CONFIG = {
   ROUTE_CACHE_SEC: 21600,             // 同一経路の距離キャッシュ保持時間（秒・最大6時間）
 };
 
-// ▼▼▼ PDF保存先のGoogle DriveフォルダID ▼▼▼
-const PDF_ROOT_FOLDER_ID = "1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o";
+// ▼▼▼ PDFの保存先（Googleドライブ「経費精算」フォルダの中） ▼▼▼
+// 社員は「社員」、パートナーは「パートナー」フォルダに分けて、
+//   社員/2026年/10月/2026-10_福山_稼働費.pdf
+// のように保存する（年・月のフォルダは無ければ自動で作る）。
+// 経費精算のGASも同じ場所・同じ名前の付け方なので、1つの月フォルダに両方が並ぶ。
+// パートナーが増えたら PARTNER_NAMES に名字を足す（鈴木・毛利・山内は先に入れてある）。
+const PDF_FOLDER_ID = {
+  staff:   "1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o",   // 経費精算/社員
+  partner: "1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K",   // 経費精算/パートナー
+};
+const PARTNER_NAMES = ['山口', '鈴木', '毛利', '山内'];
+// ファイル名に使う短い名前（「福山康平」→「福山」）
+const SHORT_NAMES = ['福山', '古川', '清田', '福岡', '山口', '鈴木', '毛利', '山内'];
 
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
 // コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
-const CODE_VERSION = '2026-10-31';
+const CODE_VERSION = '2026-11-02';
 
 // ── 年の判定 ─────────────────────────────────────────────────
 // 以前は年を 2026 に固定していたため、年をまたぐと
@@ -208,12 +219,18 @@ function report_(msg) {
 // 「DriveApp.getFolderById を呼び出す権限がありません」が出るかどうかを、
 // PDF書き出しやスタッフ名の指定と無関係に単体で確認できる。
 function checkDriveAccess() {
-  try {
-    const folder = DriveApp.getFolderById(PDF_ROOT_FOLDER_ID);
-    return report_('✅ Drive OK: フォルダにアクセスできました →「' + folder.getName() + '」');
-  } catch (err) {
-    return report_('❌ Drive NG: ' + err.message);
-  }
+  const lines = [];
+  let ok = true;
+  [['社員', PDF_FOLDER_ID.staff], ['パートナー', PDF_FOLDER_ID.partner]].forEach(function(p) {
+    try {
+      const folder = DriveApp.getFolderById(p[1]);
+      lines.push('✅ ' + p[0] + '：「' + folder.getName() + '」にアクセスできました');
+    } catch (err) {
+      ok = false;
+      lines.push('❌ ' + p[0] + '：' + err.message);
+    }
+  });
+  return report_((ok ? '✅ Drive OK\n' : '❌ Drive NG\n') + lines.join('\n'));
 }
 
 // PDF保存だけを試す診断用。Webフォーム経由だと通信エラーに埋もれて原因が見えないため、
@@ -1094,25 +1111,15 @@ function resetMonthWeb(staffName, month) {
   return { year: year, month: month };
 }
 
-// ── Google DriveへPDF保存（指定フォルダへ直接保存） ──────────
+// ── Google DriveへPDF保存（社員/パートナー → 年 → 月のフォルダ） ──
 function exportCommutePdf(staffName) {
-  if (!PDF_ROOT_FOLDER_ID) {
-    throw new Error('PDF保存先フォルダが未設定です。PDF_ROOT_FOLDER_IDを設定してください。');
-  }
   var sheet = getCommuteSheet(staffName);
   var ss = sheet.getParent();
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+  var year = sheetYear_(sheet, month);
 
-  // フォルダIDの誤りとアクセス権不足を区別できるようにメッセージを付ける
-  var targetFolder;
-  try {
-    targetFolder = DriveApp.getFolderById(PDF_ROOT_FOLDER_ID);
-  } catch (err) {
-    throw new Error('PDF保存先フォルダにアクセスできません（ID: ' + PDF_ROOT_FOLDER_ID + '）。'
-      + 'スクリプトの実行アカウントにこのフォルダの編集権限があるか確認してください。');
-  }
-
-  var fileName = sheetYear_(sheet, month) + '年' + month + '月_' + staffName + '_稼働費.pdf';
+  var targetFolder = pdfMonthFolder_(staffName, year, month);
+  var fileName = pdfFileName_(staffName, year, month, '稼働費');
   var pdfBlob = exportCommuteSheetAsPdf(ss, sheet).setName(fileName);
 
   var existingFiles = targetFolder.getFilesByName(fileName);
@@ -1122,6 +1129,42 @@ function exportCommutePdf(staffName) {
   targetFolder.createFile(pdfBlob);
 
   return '保存完了';
+}
+
+function shortName_(name) {
+  var n = String(name || '').replace(/[\s\u3000]/g, '');
+  for (var i = 0; i < SHORT_NAMES.length; i++) {
+    if (n.indexOf(SHORT_NAMES[i]) === 0) return SHORT_NAMES[i];
+  }
+  return n;
+}
+
+function isPartner_(name) {
+  return PARTNER_NAMES.indexOf(shortName_(name)) >= 0;
+}
+
+// 例：pdfFileName_('福山康平', 2026, 10, '稼働費') → '2026-10_福山_稼働費.pdf'
+function pdfFileName_(name, y, m, kind) {
+  return y + '-' + ('0' + Number(m)).slice(-2) + '_' + shortName_(name) + '_' + kind + '.pdf';
+}
+
+// 社員/パートナー → 「2026年」→「10月」のフォルダ（無ければ作る）
+function pdfMonthFolder_(name, y, m) {
+  var id = isPartner_(name) ? PDF_FOLDER_ID.partner : PDF_FOLDER_ID.staff;
+  var root;
+  try {
+    root = DriveApp.getFolderById(id);
+  } catch (err) {
+    throw new Error('PDF保存先フォルダにアクセスできません（' + (isPartner_(name) ? 'パートナー' : '社員')
+      + '／ID: ' + id + '）。スクリプトの実行アカウントにこのフォルダの編集権限があるか確認してください。');
+  }
+  return getOrCreateFolder_(getOrCreateFolder_(root, y + '年'), Number(m) + '月');
+}
+
+function getOrCreateFolder_(parent, name) {
+  var folders = parent.getFoldersByName(name);
+  if (folders.hasNext()) return folders.next();
+  return parent.createFolder(name);
 }
 
 function exportCommuteSheetAsPdf(ss, sheet) {
