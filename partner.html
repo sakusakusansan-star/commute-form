@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>稼働費入力（パートナー）</title>
+<meta name="description" content="パートナー様の稼働費入力。自宅と稼働場所を登録して、Googleマップで距離を出す。">
+<meta name="theme-color" content="#EFF1F4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0C1015" media="(prefers-color-scheme: dark)">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<link rel="stylesheet" href="sieg-theme.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html { font-size: 16px; }
+  body { font-family: var(--sg-font); background: var(--sg-bg); color: var(--sg-ink); min-height: 100vh; padding: 10px 16px 30px; }
+  button { font-family: inherit; cursor: pointer; }
+  .page { display: none; } .page.active { display: block; }
+  .card { background: var(--sg-surface); border-radius: var(--sg-r); padding: 16px; margin-bottom: 10px; box-shadow: var(--sg-lift); }
+  .card-label { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--sg-mute); margin-bottom: 10px; }
+  .card-label .sg-ic { width: 16px; height: 16px; }
+  .hint { font-size: 12.5px; color: var(--sg-mute); line-height: 1.6; margin-bottom: 10px; }
+  .field-label { display: block; font-size: 12px; color: var(--sg-mute); margin: 10px 0 6px; font-weight: 700; }
+  input[type="text"], input[type="number"], input[type="search"], select {
+    width: 100%; padding: 13px 14px; border: 2px solid var(--sg-hair); border-radius: var(--sg-r-sm);
+    font-size: 16px; font-family: inherit; color: var(--sg-ink); background: var(--sg-sunk); -webkit-appearance: none; appearance: none;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--sg-primary); background-color: var(--sg-surface); }
+  select {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' fill='none' stroke='%236B7584' stroke-width='2' stroke-linecap='round'/></svg>");
+    background-repeat: no-repeat; background-position: right 14px center; padding-right: 40px;
+  }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 10px 16px;
+    border: 0; border-radius: var(--sg-r-sm); font-size: 14px; font-weight: 800; background: var(--sg-primary); color: var(--sg-on-primary); }
+  .btn.sub { background: var(--sg-sunk); color: var(--sg-ink); border: 1.5px solid var(--sg-hair); }
+  .btn.danger { background: var(--sg-red-tint); color: var(--sg-red); }
+  .btn.wide { width: 100%; }
+  .btn:disabled { opacity: .5; }
+  .msg { font-size: 13px; text-align: center; margin-top: 8px; line-height: 1.6; }
+  .msg:empty { display: none; }
+  .msg.ok { color: var(--sg-green); } .msg.ng { color: var(--sg-red); } .msg.info { color: var(--sg-mute); }
+  .notice { border-radius: var(--sg-r-sm); padding: 12px 14px; font-size: 13px; line-height: 1.65; margin-bottom: 10px; background: var(--sg-amber-tint); color: var(--sg-ink2); }
+  .notice b { color: var(--sg-ink); }
+  .notice a { color: var(--sg-blue); font-weight: 700; }
+  .notice.err { background: var(--sg-red-tint); color: var(--sg-red); }
+
+  /* 月 */
+  .month-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .month-bar button { width: 44px; height: 40px; border: 0; border-radius: 10px; background: var(--sg-surface); color: var(--sg-blue); font-size: 16px; font-weight: 800; box-shadow: var(--sg-lift); }
+  .month-bar button:disabled { opacity: .35; }
+  .month-bar .t { font-size: 16px; font-weight: 900; }
+
+  /* カレンダー */
+  .cal-dow, .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-dow span { text-align: center; font-size: 11px; color: var(--sg-mute); font-weight: 700; padding: 4px 0; }
+  .cal-dow .sun, .cal-day.sun { color: var(--sg-sun); } .cal-dow .sat, .cal-day.sat { color: var(--sg-sat); }
+  .cal-day { position: relative; min-height: 42px; border: 0; border-radius: 9px; background: none; font-size: 15px; font-weight: 600; color: var(--sg-ink); }
+  .cal-day.filled::after { content: ''; position: absolute; left: 50%; bottom: 5px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--sg-green); }
+  .cal-day.on { background: var(--sg-primary); color: var(--sg-on-primary); font-weight: 900; }
+  .cal-day.on.filled::after { background: var(--sg-on-primary); }
+  .cal-day.today:not(.on) { box-shadow: inset 0 0 0 1.5px var(--sg-hair); }
+  .cal-legend { display: flex; justify-content: center; gap: 14px; margin-top: 8px; font-size: 11.5px; color: var(--sg-mute); }
+  .cal-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--sg-green); margin-right: 5px; vertical-align: 1px; }
+  .cal-legend b { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--sg-primary); margin-right: 5px; vertical-align: -1px; }
+  .days-info { text-align: center; font-size: 13px; font-weight: 700; color: var(--sg-blue); margin-top: 8px; min-height: 18px; }
+
+  /* 経路 */
+  .route { position: relative; padding-left: 4px; }
+  .stop { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; position: relative; }
+  .stop .dot { flex: none; width: 28px; height: 28px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 900; background: var(--sg-blue-tint); color: var(--sg-blue); position: relative; z-index: 1; }
+  .stop .dot.home { background: var(--sg-primary); color: var(--sg-on-primary); }
+  .stop .dot.home svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .route::before { content: ''; position: absolute; left: 17px; top: 14px; bottom: 14px; width: 2px; background: var(--sg-hair); }
+  .stop .fixed { flex: 1; font-size: 15px; font-weight: 800; padding: 12px 0; }
+  .stop .fixed small { font-weight: 600; color: var(--sg-mute); font-size: 12px; margin-left: 6px; }
+  .stop select { flex: 1; min-width: 0; }
+  .stop .rm { flex: none; width: 40px; height: 44px; border: 0; border-radius: 10px; background: var(--sg-sunk); color: var(--sg-mute); font-size: 20px; }
+  .add-stop { margin: 0 0 8px 38px; width: calc(100% - 38px); border: 1.5px dashed var(--sg-hair); background: var(--sg-surface); color: var(--sg-blue); }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .seg button { min-height: 48px; border: 2px solid var(--sg-hair); border-radius: var(--sg-r-sm); background: var(--sg-surface); font-size: 15px; font-weight: 800; color: var(--sg-mute); }
+  .seg button[aria-pressed="true"] { border-color: var(--sg-primary); background: var(--sg-blue-tint); color: var(--sg-ink); }
+  .money { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .money .one { grid-column: 1 / -1; }
+  .yen { position: relative; }
+  .yen input { padding-right: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  .yen::after { content: '円'; position: absolute; right: 14px; top: 50%; transform: translateY(-50%); font-size: 14px; color: var(--sg-mute); }
+
+  /* 計算 */
+  .calc { background: var(--sg-blue-tint); border-radius: var(--sg-r-sm); padding: 12px 14px; font-size: 13px; color: var(--sg-ink2); line-height: 1.7; }
+  .calc .leg { display: flex; justify-content: space-between; gap: 10px; }
+  .calc .leg span:last-child, .calc .sum span:last-child { font-variant-numeric: tabular-nums; flex: none; }
+  .calc .sum { display: flex; justify-content: space-between; border-top: 1px solid var(--sg-hair); margin-top: 6px; padding-top: 6px; }
+  .calc .big { display: flex; justify-content: space-between; align-items: baseline; margin-top: 4px; font-weight: 900; color: var(--sg-ink); }
+  .calc .big span:last-child { font-size: 22px; font-variant-numeric: tabular-nums; }
+  .calc.wait { color: var(--sg-mute); text-align: center; }
+  .calc.err { background: var(--sg-red-tint); color: var(--sg-red); }
+
+  /* 一覧 */
+  .total { display: flex; align-items: center; justify-content: space-between; gap: 12px; background: var(--sg-primary); color: var(--sg-on-primary);
+    border-radius: var(--sg-r); padding: 16px; margin-bottom: 10px; }
+  .total .k { font-size: 13px; font-weight: 700; opacity: .85; }
+  .total .s { font-size: 12px; opacity: .72; margin-top: 3px; line-height: 1.5; }
+  .total .v { font-size: 28px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .entry { border-left: 4px solid var(--sg-primary); background: var(--sg-sunk); border-radius: 0 12px 12px 0; padding: 12px 14px; margin-bottom: 8px; }
+  .entry.via { border-left-color: var(--sg-amber); }
+  .entry .top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+  .entry .d { font-size: 13px; font-weight: 900; color: var(--sg-blue); }
+  .entry .a { font-size: 16px; font-weight: 900; font-variant-numeric: tabular-nums; }
+  .entry .r { font-size: 13.5px; font-weight: 700; margin-top: 4px; line-height: 1.5; }
+  .entry .x { font-size: 12px; color: var(--sg-mute); margin-top: 3px; line-height: 1.55; }
+  .entry .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .entry .acts .btn { min-height: 38px; padding: 6px 14px; font-size: 13px; }
+  .empty { text-align: center; color: var(--sg-mute); font-size: 14px; padding: 26px 0; }
+
+  /* 添付 */
+  .attach { margin-bottom: 12px; }
+  .attach + .attach { margin-top: -2px; }
+  .btn-attach { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 48px; padding: 10px;
+    background: var(--sg-sunk); color: var(--sg-ink); border: 1.5px dashed var(--sg-hair); border-radius: var(--sg-r-sm); font-size: 14px; font-weight: 800; cursor: pointer; }
+  .attach ul { list-style: none; }
+  .attach li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--sg-sunk); border-radius: 10px; margin-top: 6px; font-size: 13px; }
+  .attach li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach li .sz { color: var(--sg-mute); font-size: 12px; }
+  .attach li .st { font-size: 12px; } .attach li .st.ok { color: var(--sg-green); } .attach li .st.ng { color: var(--sg-red); }
+  .attach li button { border: 0; background: none; color: var(--sg-mute); font-size: 18px; padding: 2px 6px; }
+
+  /* 住所さがし */
+  .finder-row { display: flex; gap: 8px; }
+  .finder-row input { flex: 1; min-width: 0; }
+  .finder-row .btn { flex: none; }
+  .cands { list-style: none; margin-top: 8px; }
+  .cands li button { display: block; width: 100%; text-align: left; padding: 11px 12px; margin-top: 6px; border: 2px solid var(--sg-hair);
+    border-radius: var(--sg-r-sm); background: var(--sg-surface); color: var(--sg-ink); font-size: 14px; line-height: 1.5; }
+  .cands li button[aria-pressed="true"] { border-color: var(--sg-primary); background: var(--sg-blue-tint); font-weight: 800; }
+  .place { padding: 12px 0; border-top: 1px solid var(--sg-hair2); }
+  .place:first-child { border-top: 0; }
+  .place .n { font-size: 15px; font-weight: 800; }
+  .place .ad { font-size: 12.5px; color: var(--sg-mute); margin-top: 2px; line-height: 1.5; }
+  .place .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .place .acts .btn { min-height: 36px; padding: 6px 14px; font-size: 13px; }
+  .pform { background: var(--sg-sunk); border-radius: var(--sg-r-sm); padding: 12px; margin-top: 10px; }
+  .pform input[type="text"], .pform input[type="search"] { background: var(--sg-surface); }
+  .pform .now { font-size: 12.5px; color: var(--sg-mute); margin-top: 6px; }
+  .pform .row2 { display: flex; gap: 8px; margin-top: 12px; }
+  .pform .row2 .btn { flex: 1; }
+  .home-now { font-size: 15px; font-weight: 800; }
+  .home-now small { display: block; font-size: 12px; font-weight: 600; color: var(--sg-mute); margin-top: 2px; }
+
+  /* 場所の登録（入力画面から開くシート） */
+  .sheet-bg { position: fixed; inset: 0; background: var(--sg-scrim); z-index: 60; display: flex; align-items: flex-end; justify-content: center; }
+  .sheet-bg[hidden] { display: none; }
+  .sheet { width: 100%; max-width: var(--sg-page-w); max-height: 88vh; overflow: auto; background: var(--sg-surface); border-radius: 20px 20px 0 0;
+    padding: 18px 16px calc(18px + env(safe-area-inset-bottom)); }
+  .sheet h2 { font-size: 17px; font-weight: 900; margin-bottom: 4px; }
+
+  #state { text-align: center; color: var(--sg-mute); font-size: 14px; padding: 40px 0; line-height: 1.7; }
+  @media (prefers-reduced-motion: no-preference) { .btn, .seg button, .cal-day { transition: transform .06s; } .btn:active { transform: scale(.985); } }
+</style>
+</head>
+<body class="has-tabbar has-actionbar">
+<div class="sg-page">
+  <div data-sieg-back></div>
+  <header class="sg-head">
+    <div>
+      <div class="sg-eyebrow">Sieg 業務ポータル</div>
+      <h1 class="sg-title">稼働費入力</h1>
+      <div class="sg-sub" id="sub">パートナー様用</div>
+    </div>
+    <span class="sg-who" id="who" hidden><i id="who-i">?</i><span id="who-n"></span></span>
+  </header>
+
+  <div id="state">読み込み中…</div>
+
+  <div id="app" hidden>
+    <div id="top-notice"></div>
+
+    <!-- 入力 -->
+    <section id="page-input" class="page active" aria-labelledby="tab-input">
+      <div id="setup-card"></div>
+
+      <div class="month-bar"><button type="button" class="m-prev" aria-label="前の月">‹</button><div class="t m-title"></div><button type="button" class="m-next" aria-label="次の月">›</button></div>
+
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M3 10h18"/></svg> 日付（同じ経路の日はまとめて選べます）</div>
+        <div class="cal-dow"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div>
+        <div class="cal-grid" id="cal"></div>
+        <div class="cal-legend"><span><i></i>入力済み</span><span><b></b>選んでいる日</span></div>
+        <div class="days-info" id="days-info"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg> 経路</div>
+        <p class="hint">いつもの日は行き先を1つ選ぶだけ。別の現場にも回った日は「経由地を追加」で足してください。</p>
+        <div class="route" id="route"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M6 19V9l6-4 6 4v10"/><path d="M10 19v-5h4v5"/></svg> 高速・駐車場</div>
+        <div class="seg" role="group" aria-label="高速道路">
+          <button type="button" id="hw-no" aria-pressed="true">高速なし</button>
+          <button type="button" id="hw-yes" aria-pressed="false">高速を使った</button>
+        </div>
+        <div class="money">
+          <div id="toll-box" hidden><label class="field-label" for="toll">高速代（往復の合計）</label><div class="yen"><input type="number" id="toll" inputmode="numeric" min="0" step="1" placeholder="0"></div></div>
+          <div id="park-box"><label class="field-label" for="parking">駐車場代</label><div class="yen"><input type="number" id="parking" inputmode="numeric" min="0" step="1" placeholder="0"></div></div>
+          <div class="one"><label class="field-label" for="note">備考（なくてもよい）</label><input type="text" id="note" maxlength="200" placeholder="例：春日に応援"></div>
+        </div>
+        <p class="hint" id="per-day" style="margin:8px 0 0;" hidden>何日か選んでいるときは、高速代・駐車場代は「1日あたり」です。</p>
+      </div>
+
+      <div class="calc wait" id="calc">行き先を選ぶと、距離と金額がここに出ます。</div>
+      <div class="msg" id="save-msg"></div>
+    </section>
+
+    <!-- 一覧・PDF -->
+    <section id="page-list" class="page" aria-labelledby="tab-list">
+      <div class="month-bar"><button type="button" class="m-prev" aria-label="前の月">‹</button><div class="t m-title"></div><button type="button" class="m-next" aria-label="次の月">›</button></div>
+      <div class="total"><div><div class="k">この月の合計</div><div class="s" id="tot-sub">—</div></div><div class="v" id="tot-v">¥0</div></div>
+      <div class="card"><div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg> 入力した日</div><div id="entries"><div class="empty">読み込み中…</div></div></div>
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> 月末の提出（PDF）</div>
+        <p class="hint">この月の稼働費をPDFにしてGoogleドライブに保存します。ETCの利用明細や駐車場の領収書も添付すると、同じ月のフォルダに一緒に入ります。</p>
+        <div class="attach" data-kind="ETC">
+          <label class="btn-attach" for="att-ETC"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> ETCの利用明細を添付</label>
+          <input type="file" id="att-ETC" accept="application/pdf,image/*" multiple hidden><ul></ul>
+        </div>
+        <div class="attach" data-kind="parking">
+          <label class="btn-attach" for="att-parking"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> 駐車場の領収書を添付</label>
+          <input type="file" id="att-parking" accept="application/pdf,image/*" multiple hidden><ul></ul>
+        </div>
+        <div class="msg ng" id="att-msg"></div>
+        <button type="button" class="btn wide" id="btn-pdf"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> <span id="btn-pdf-label">PDFをGoogleドライブへ保存</span></button>
+        <div class="msg" id="pdf-msg"></div>
+      </div>
+    </section>
+
+    <!-- 自宅と場所 -->
+    <section id="page-places" class="page" aria-labelledby="tab-places">
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6 8 6v9H4z"/><path d="M10 20v-5h4v5"/></svg> 自宅</div>
+        <div id="home-box"></div>
+      </div>
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg> 稼働場所</div>
+        <p class="hint">よく行く店や現場を登録しておくと、入力のときに選べます。住所でも店の名前（例：イオン大牟田）でも探せます。</p>
+        <div id="place-list"></div>
+        <button type="button" class="btn sub wide" id="btn-add-place" style="margin-top:10px;">＋ 場所を登録</button>
+        <div id="place-add"></div>
+      </div>
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/></svg> 氏名（PDFに載ります）</div>
+        <div class="finder-row"><input type="text" id="full-name" maxlength="30" placeholder="例：鈴木 太郎" autocomplete="name"><button type="button" class="btn" id="btn-full-name">保存</button></div>
+        <div class="msg" id="full-name-msg"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="sg-actionbar" id="actionbar" hidden>
+    <button type="button" class="sg-primary" id="btn-save" disabled>送信する</button>
+  </div>
+
+  <nav class="sg-tabbar" role="tablist" aria-label="画面の切り替え" id="tabbar" hidden>
+    <button type="button" class="sg-tab" role="tab" id="tab-input" aria-selected="true" data-tab="input"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>入力</button>
+    <button type="button" class="sg-tab" role="tab" id="tab-list" aria-selected="false" data-tab="list"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>一覧・提出</button>
+    <button type="button" class="sg-tab" role="tab" id="tab-places" aria-selected="false" data-tab="places"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>自宅と場所</button>
+  </nav>
+</div>
+
+<div class="sheet-bg" id="sheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <h2 id="sheet-title">場所を登録</h2>
+    <p class="hint">登録すると、この行き先に入ります。</p>
+    <div id="sheet-body"></div>
+  </div>
+</div>
+
+<script src="sieg-nav.js"></script>
+<script src="/sieg-portal/sieg-roster.js"></script>
+<script src="/sieg-portal/gas-client.js"></script>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var R = window.SiegRoster;
+  var API = window.PARTNER_COMMUTE_API_OVERRIDE || (R && R.commutePartnerApi) || '';
+  var OLD_PAGE = 'index.html';
+  var WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+  var HOME_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11l8-6 8 6v9H4z"/><path d="M10 20v-5h4v5"/></svg>';
+
+  var me = null, name = '', ym = '', minYm = '', maxYm = '';
+  var month = null;              // listMonth の結果
+  var picked = {};               // 選んでいる日 { 1: true }
+  var stops = [''];              // 自宅と自宅のあいだの行き先（場所ID）
+  var highway = false;
+  var preview = null, previewSeq = 0, previewTimer = 0;
+  var saving = false, sheetStopIndex = -1;
+
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  function yen(n) { return '¥' + Number(n || 0).toLocaleString('ja-JP'); }
+  function km(n) { return (Math.round(Number(n) * 10) / 10).toFixed(1) + 'km'; }
+  function ymOf(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function addMonth(s, n) { var d = new Date(Number(s.slice(0, 4)), Number(s.slice(5)) - 1 + n, 1); return ymOf(d); }
+  function ymLabel(s) { return Number(s.slice(0, 4)) + '年' + Number(s.slice(5)) + '月'; }
+  function dayText(date) { var d = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8))); return (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）'; }
+  function setMsg(el, text, kind) { el = typeof el === 'string' ? $(el) : el; el.classList.remove('ok', 'ng', 'info'); if (kind) el.classList.add(kind); el.textContent = text || ''; }
+
+  function call(action, body, opts) {
+    var o = opts || {};
+    return GasClient.post(API, Object.assign({ action: action, name: name }, body || {}), { retry: !!o.retry, timeoutMs: o.timeoutMs || 45000 })
+      .then(function (json) {
+        if (!json || !json.ok) throw new Error((json && json.error) || '不明なエラー');
+        return json.data;
+      });
+  }
+
+  // ── 名前 ──
+  function pickName() {
+    var partners = (R && R.partners) || [];
+    var q = new URLSearchParams(location.search).get('staff') || '';
+    var short = '';
+    partners.forEach(function (p) { if (q === p || (R.fullName(p) && q === R.fullName(p))) short = p; });
+    if (!short && !q && window.SiegNav) short = SiegNav.staff(partners);
+    return { short: short, asked: q };
+  }
+
+  function start() {
+    var n = pickName();
+    if (!n.short) {
+      $('state').innerHTML = (n.asked ? esc(n.asked) + 'さんはこの画面を使いません。' : 'ポータルで名前を選んでから開いてください。')
+        + '<br><a href="' + OLD_PAGE + (n.asked ? '?staff=' + encodeURIComponent(n.asked) : '') + '">社員の稼働費入力はこちら</a>';
+      return;
+    }
+    name = n.short;
+    $('who').hidden = false; $('who-i').textContent = name.charAt(0); $('who-n').textContent = name;
+    if (!API) { $('state').textContent = 'この画面はただいま準備中です（Google側の設定が終わると使えます）。'; return; }
+    call('init', {}, { retry: true }).then(function (d) {
+      me = d;
+      var now = ymOf(new Date());
+      minYm = me.from || addMonth(now, -3);
+      maxYm = addMonth(now, 1);
+      ym = now < minYm ? minYm : now;
+      $('state').hidden = true; $('app').hidden = false; $('tabbar').hidden = false;
+      renderNotice(now);
+      renderAll();
+      renderAtt();
+      $('actionbar').hidden = false;
+      var t = new URLSearchParams(location.search).get('tab');
+      switchTab(t === 'list' || t === 'places' ? t : 'input');
+      loadMonth();
+    }).catch(function (e) { $('state').innerHTML = '読み込めませんでした：' + esc(e.message) + '<br><button class="btn" style="margin-top:12px" onclick="location.reload()">もう一度</button>'; });
+  }
+
+  function renderNotice(now) {
+    var box = $('top-notice');
+    if (me.from && now <= me.from) {
+      var prev = addMonth(me.from, -1);
+      box.innerHTML = '<div class="notice"><b>' + ymLabel(me.from) + '分からこの画面で入力します。</b><br>'
+        + ymLabel(prev) + '分までの入力・PDFは<a href="' + OLD_PAGE + '?staff=' + encodeURIComponent(name) + '&old=1">前の画面</a>で行ってください。'
+        + (now < me.from ? '<br>今のうちに「自宅と場所」で自宅と稼働場所を登録しておけます。' : '') + '</div>';
+    } else box.innerHTML = '';
+  }
+
+  function renderAll() {
+    renderSetup(); renderMonthBars(); renderCal(); renderRoute(); renderHome(); renderPlaces(); updateCalc();
+    $('full-name').value = me.fullName || '';
+  }
+
+  // ── はじめに ──
+  function renderSetup() {
+    var box = $('setup-card');
+    if (me.homeSet && me.places.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="notice"><b>はじめに</b><br>'
+      + (me.homeSet ? '' : '① 自宅を登録してください。<br>')
+      + (me.places.length ? '' : (me.homeSet ? '' : '② ') + 'よく行く稼働場所を登録してください。<br>')
+      + '<button type="button" class="btn" style="margin-top:8px" id="go-places">自宅と場所を登録する</button></div>';
+    $('go-places').onclick = function () { switchTab('places'); };
+  }
+
+  // ── 月 ──
+  function renderMonthBars() {
+    Array.prototype.forEach.call(document.querySelectorAll('.m-title'), function (el) { el.textContent = ymLabel(ym); });
+    Array.prototype.forEach.call(document.querySelectorAll('.m-prev'), function (b) { b.disabled = ym <= minYm; });
+    Array.prototype.forEach.call(document.querySelectorAll('.m-next'), function (b) { b.disabled = ym >= maxYm; });
+    $('sub').textContent = ymLabel(ym) + '・パートナー様用';
+  }
+  function changeMonth(n) {
+    var next = addMonth(ym, n);
+    if (next < minYm || next > maxYm) return;
+    ym = next; picked = {}; month = null;
+    renderMonthBars(); renderCal(); updateCalc(); loadMonth();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.m-prev'), function (b) { b.onclick = function () { changeMonth(-1); }; });
+  Array.prototype.forEach.call(document.querySelectorAll('.m-next'), function (b) { b.onclick = function () { changeMonth(1); }; });
+
+  function loadMonth() {
+    var want = ym;
+    $('entries').innerHTML = '<div class="empty">読み込み中…</div>';
+    return call('listMonth', { ym: want }, { retry: true }).then(function (d) {
+      if (want !== ym) return;
+      month = d; renderCal(); renderList();
+    }).catch(function (e) {
+      if (want !== ym) return;
+      $('entries').innerHTML = '<div class="empty" style="color:var(--sg-red)">読み込めませんでした：' + esc(e.message) + '</div>';
+    });
+  }
+  function filled() {
+    var f = {};
+    (month ? month.entries : []).forEach(function (e) { f[Number(e.date.slice(8))] = e; });
+    return f;
+  }
+
+  // ── カレンダー ──
+  function renderCal() {
+    var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5));
+    var first = new Date(y, m - 1, 1).getDay(), days = new Date(y, m, 0).getDate();
+    var f = filled(), t = new Date(), html = '';
+    for (var i = 0; i < first; i++) html += '<span></span>';
+    for (var d = 1; d <= days; d++) {
+      var w = (first + d - 1) % 7, cls = 'cal-day' + (w === 0 ? ' sun' : w === 6 ? ' sat' : '') + (f[d] ? ' filled' : '') + (picked[d] ? ' on' : '')
+        + (t.getFullYear() === y && t.getMonth() + 1 === m && t.getDate() === d ? ' today' : '');
+      html += '<button type="button" class="' + cls + '" data-d="' + d + '" aria-pressed="' + (picked[d] ? 'true' : 'false') + '" aria-label="' + m + '月' + d + '日' + (f[d] ? '（入力済み）' : '') + '">' + d + '</button>';
+    }
+    $('cal').innerHTML = html;
+    var n = Object.keys(picked).length;
+    $('days-info').textContent = n ? n + '日を選んでいます' + (Object.keys(picked).some(function (d) { return f[d]; }) ? '（入力済みの日は上書きします）' : '') : '';
+    $('per-day').hidden = n < 2;
+    updateSaveButton();
+  }
+  $('cal').addEventListener('click', function (e) {
+    var b = e.target.closest('.cal-day'); if (!b) return;
+    var d = Number(b.getAttribute('data-d'));
+    if (picked[d]) delete picked[d]; else picked[d] = true;
+    setMsg('save-msg', '');
+    renderCal(); updateCalc();
+  });
+
+  // ── 経路 ──
+  function placeOptions(sel) {
+    var html = '<option value="">行き先を選んでください</option>';
+    me.places.forEach(function (p) { html += '<option value="' + esc(p.id) + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name) + '</option>'; });
+    return html + '<option value="__new">＋ 新しい場所を登録…</option>';
+  }
+  function renderRoute() {
+    var html = '<div class="stop"><span class="dot home">' + HOME_SVG + '</span><div class="fixed">自宅<small>出発</small></div></div>';
+    stops.forEach(function (s, i) {
+      html += '<div class="stop"><span class="dot">' + (i + 1) + '</span><select data-i="' + i + '" aria-label="' + (i === 0 ? '行き先' : '経由地' + i) + '">' + placeOptions(s) + '</select>'
+        + (i > 0 ? '<button type="button" class="rm" data-rm="' + i + '" aria-label="この経由地を外す">×</button>' : '') + '</div>';
+    });
+    if (stops.length < (me.maxStops || 10) - 2) html += '<button type="button" class="btn add-stop" id="add-stop">＋ 経由地を追加</button>';
+    html += '<div class="stop"><span class="dot home">' + HOME_SVG + '</span><div class="fixed">自宅<small>帰り</small></div></div>';
+    $('route').innerHTML = html;
+    var add = $('add-stop');
+    if (add) add.onclick = function () { stops.push(''); renderRoute(); updateCalc(); var s = $('route').querySelectorAll('select'); s[s.length - 1].focus(); };
+  }
+  $('route').addEventListener('change', function (e) {
+    var s = e.target.closest('select'); if (!s) return;
+    var i = Number(s.getAttribute('data-i'));
+    if (s.value === '__new') { s.value = stops[i]; openSheet(i); return; }
+    stops[i] = s.value; setMsg('save-msg', ''); updateCalc();
+  });
+  $('route').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-rm]'); if (!b) return;
+    stops.splice(Number(b.getAttribute('data-rm')), 1); renderRoute(); updateCalc();
+  });
+
+  function setHighway(v) {
+    highway = v;
+    $('hw-no').setAttribute('aria-pressed', v ? 'false' : 'true');
+    $('hw-yes').setAttribute('aria-pressed', v ? 'true' : 'false');
+    $('toll-box').hidden = !v;
+    if (!v) $('toll').value = '';
+    updateCalc();
+  }
+  $('hw-no').onclick = function () { setHighway(false); };
+  $('hw-yes').onclick = function () { setHighway(true); };
+  ['toll', 'parking'].forEach(function (id) { $(id).addEventListener('input', function () { drawCalc(); updateSaveButton(); }); });
+
+  function amount(id) { var v = $(id).value.trim(); return v === '' ? 0 : Number(v); }
+  function amountsOk() {
+    return ['toll', 'parking'].every(function (id) { var n = amount(id); return isFinite(n) && n >= 0 && Math.floor(n) === n && n <= 100000; });
+  }
+  function routeStops() { return ['home'].concat(stops).concat(['home']); }
+  function routeReady() { return me.homeSet && stops.length && stops.every(function (s) { return !!s; }) && !stops.some(function (s, i) { return i && s === stops[i - 1]; }); }
+
+  function updateCalc() {
+    preview = null;
+    clearTimeout(previewTimer);
+    if (!me.homeSet) { drawCalc('先に「自宅と場所」で自宅を登録してください。', 'wait'); return; }
+    if (!stops.every(function (s) { return !!s; })) { drawCalc('行き先を選ぶと、距離と金額がここに出ます。', 'wait'); return; }
+    if (!routeReady()) { drawCalc('同じ場所が続いています。経由地を選び直してください。', 'err'); return; }
+    drawCalc('距離を計算しています…', 'wait');
+    var seq = ++previewSeq, st = routeStops(), hw = highway;
+    previewTimer = setTimeout(function () {
+      call('previewRoute', { stops: st, highway: hw }, { retry: true }).then(function (d) {
+        if (seq !== previewSeq) return;
+        preview = d; drawCalc();
+      }).catch(function (e) { if (seq === previewSeq) drawCalc(e.message, 'err'); });
+    }, 350);
+  }
+
+  function drawCalc(text, kind) {
+    var el = $('calc');
+    if (text) { el.className = 'calc ' + kind; el.textContent = text; updateSaveButton(); return; }
+    if (!preview) return;
+    var toll = highway ? amount('toll') || 0 : 0, park = amount('parking') || 0;
+    var n = Object.keys(picked).length, day = preview.gas + toll + park;
+    var html = preview.legs.map(function (l) { return '<div class="leg"><span>' + esc(l.from) + ' → ' + esc(l.to) + '</span><span>' + km(l.km) + '</span></div>'; }).join('');
+    html += '<div class="sum"><span>' + km(preview.km) + ' × ' + (me.rate || 15) + '円</span><span>' + yen(preview.gas) + '</span></div>';
+    if (toll) html += '<div class="leg"><span>高速代</span><span>' + yen(toll) + '</span></div>';
+    if (park) html += '<div class="leg"><span>駐車場代</span><span>' + yen(park) + '</span></div>';
+    html += '<div class="big"><span>' + (n > 1 ? '1日 ' + yen(day) + ' × ' + n + '日' : '1日の合計') + '</span><span>' + yen(n > 1 ? day * n : day) + '</span></div>';
+    el.className = 'calc'; el.innerHTML = html;
+    updateSaveButton();
+  }
+
+  function updateSaveButton() {
+    var n = Object.keys(picked).length, b = $('btn-save');
+    var ok = !!preview && n > 0 && routeReady() && amountsOk() && !saving;
+    b.disabled = !ok;
+    b.textContent = saving ? '送信中…' : n ? n + '日分を送信する' : '日付を選んでください';
+  }
+
+  $('btn-save').onclick = function () {
+    if ($('btn-save').disabled) return;
+    var f = filled(), days = Object.keys(picked).map(Number).sort(function (a, b) { return a - b; });
+    var over = days.filter(function (d) { return f[d]; });
+    if (over.length && !confirm(over.map(function (d) { return Number(ym.slice(5)) + '/' + d; }).join('・') + ' はもう入力してあります。上書きしますか？')) return;
+    if (highway && !amount('toll') && !confirm('高速代が0円です。このまま送りますか？')) return;
+    saving = true; updateSaveButton(); setMsg('save-msg', '');
+    call('saveDays', {
+      dates: days.map(function (d) { return ym + '-' + String(d).padStart(2, '0'); }),
+      stops: routeStops(), highway: highway, toll: highway ? amount('toll') : 0, parking: amount('parking'), note: $('note').value.trim()
+    }, { retry: true, timeoutMs: 60000 }).then(function (d) {
+      setMsg('save-msg', '✅ ' + d.saved + '日分を送信しました（' + d.route.text + '）', 'ok');
+      picked = {}; $('note').value = '';
+      return loadMonth();
+    }).catch(function (e) {
+      setMsg('save-msg', '❌ ' + e.message, 'ng');
+    }).then(function () { saving = false; renderCal(); drawCalc(); updateSaveButton(); });
+  };
+
+  // ── 一覧 ──
+  function renderList() {
+    var t = month.totals;
+    $('tot-v').textContent = yen(t.total);
+    $('tot-sub').innerHTML = esc(t.days + '日・' + km(t.km)) + '<br>' + esc('ガソリン代 ' + yen(t.gas) + (t.toll ? '・高速代 ' + yen(t.toll) : '') + (t.parking ? '・駐車場代 ' + yen(t.parking) : ''));
+    if (!month.entries.length) { $('entries').innerHTML = '<div class="empty">まだ入力がありません。</div>'; return; }
+    $('entries').innerHTML = month.entries.map(function (e) {
+      var extra = [km(e.km) + (e.highway ? '（高速）' : ''), 'ガソリン代 ' + yen(e.gas)];
+      if (e.toll) extra.push('高速代 ' + yen(e.toll));
+      if (e.parking) extra.push('駐車場代 ' + yen(e.parking));
+      return '<div class="entry' + (e.stops.length > 3 ? ' via' : '') + '"><div class="top"><span class="d">' + esc(dayText(e.date)) + '</span><span class="a">' + yen(e.total) + '</span></div>'
+        + '<div class="r">' + esc(e.text) + '</div><div class="x">' + esc(extra.join('・')) + (e.note ? '<br>' + esc(e.note) : '') + '</div>'
+        + '<div class="acts"><button type="button" class="btn sub" data-edit="' + esc(e.id) + '">直す</button><button type="button" class="btn danger" data-del="' + esc(e.id) + '">削除</button></div></div>';
+    }).join('');
+  }
+  $('entries').addEventListener('click', function (ev) {
+    var ed = ev.target.closest('[data-edit]'), dl = ev.target.closest('[data-del]');
+    var id = (ed || dl) && (ed || dl).getAttribute(ed ? 'data-edit' : 'data-del');
+    var e = id && month.entries.filter(function (x) { return x.id === id; })[0];
+    if (!e) return;
+    if (dl) {
+      if (!confirm(dayText(e.date) + ' の入力を削除しますか？')) return;
+      dl.disabled = true;
+      call('deleteEntry', { id: id }).then(loadMonth).catch(function (err) { alert(err.message); dl.disabled = false; });
+      return;
+    }
+    // 直す：入力画面にその日の内容を入れる（場所は今の一覧から名前で探す）
+    picked = {}; picked[Number(e.date.slice(8))] = true;
+    var missing = [];
+    stops = e.stops.slice(1, -1).map(function (n) {
+      var p = me.places.filter(function (x) { return x.name === n; })[0];
+      if (!p) missing.push(n);
+      return p ? p.id : '';
+    });
+    if (!stops.length) stops = [''];
+    $('toll').value = e.toll || ''; $('parking').value = e.parking || ''; $('note').value = e.note || '';
+    switchTab('input');
+    setHighway(e.highway);
+    renderRoute(); renderCal(); updateCalc();
+    setMsg('save-msg', missing.length ? '「' + missing.join('」「') + '」は今の場所の一覧にないので、選び直してください。' : dayText(e.date) + ' の内容を入れました。直して送信すると上書きします。', missing.length ? 'ng' : 'info');
+    window.scrollTo(0, 0);
+  });
+
+  // ── 添付と PDF ──
+  var ATT_MAX_SIDE = 2000, ATT_Q = 0.85, ATT_MAX_BYTES = 10 * 1024 * 1024, ATT_MAX = 10;
+  var KIND_LABEL = { ETC: 'ETC明細', parking: '駐車場の領収書' };
+  var att = { ETC: [], parking: [] }, pdfBusy = false;
+
+  function readFile(file) {
+    return new Promise(function (resolve, reject) {
+      var isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      if (!isPdf && !/^image\//.test(file.type)) { reject(new Error('PDFか写真を選んでください。')); return; }
+      if (isPdf && file.size > ATT_MAX_BYTES) { reject(new Error('10MBより大きいPDFは添付できません。')); return; }
+      function done(type, url) {
+        var data = url.split(',')[1] || '', size = Math.floor(data.length * 3 / 4);
+        if (size > ATT_MAX_BYTES) reject(new Error('10MBより大きいので添付できません。'));
+        else resolve({ name: file.name, mimeType: type, data: data, size: size, state: '' });
+      }
+      var r = new FileReader();
+      r.onerror = function () { reject(new Error('ファイルを読み込めませんでした。')); };
+      r.onload = function () {
+        if (isPdf) { done('application/pdf', r.result); return; }
+        var img = new Image();
+        img.onload = function () {
+          var sc = Math.min(1, ATT_MAX_SIDE / Math.max(img.width, img.height)), c = document.createElement('canvas');
+          c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          done('image/jpeg', c.toDataURL('image/jpeg', ATT_Q));
+        };
+        img.onerror = function () { reject(new Error('この写真の形式は読み込めませんでした。スクリーンショットかPDFでお試しください。')); };
+        img.src = r.result;
+      };
+      r.readAsDataURL(file);
+    });
+  }
+  function renderAtt() {
+    Object.keys(att).forEach(function (k) {
+      var ul = document.querySelector('.attach[data-kind="' + k + '"] ul');
+      ul.innerHTML = att[k].map(function (f, i) {
+        var sz = f.size < 1048576 ? Math.max(1, Math.round(f.size / 1024)) + 'KB' : (f.size / 1048576).toFixed(1) + 'MB';
+        var st = f.state === 'ok' ? '<span class="st ok">保存済み</span>' : f.state === 'ng' ? '<span class="st ng">失敗</span>' : '';
+        return '<li><span class="nm">' + esc(f.name) + '</span><span class="sz">' + sz + '</span>' + st + '<button type="button" data-k="' + k + '" data-i="' + i + '" aria-label="' + esc(f.name) + 'を外す">×</button></li>';
+      }).join('');
+    });
+    var n = att.ETC.length + att.parking.length;
+    $('btn-pdf-label').textContent = n ? 'PDFと添付（' + n + '件）を保存' : 'PDFをGoogleドライブへ保存';
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.attach'), function (box) {
+    var k = box.getAttribute('data-kind'), input = box.querySelector('input');
+    input.addEventListener('change', function () {
+      setMsg('att-msg', ''); setMsg('pdf-msg', '');
+      var files = Array.prototype.slice.call(input.files || []); input.value = '';
+      if (att[k].length + files.length > ATT_MAX) { setMsg('att-msg', KIND_LABEL[k] + 'は' + ATT_MAX + '件までです。', 'ng'); files = files.slice(0, Math.max(0, ATT_MAX - att[k].length)); }
+      files.reduce(function (p, file) {
+        return p.then(function () { return readFile(file).then(function (f) { att[k].push(f); renderAtt(); }).catch(function (e) { setMsg('att-msg', file.name + '：' + e.message, 'ng'); }); });
+      }, Promise.resolve());
+    });
+    box.querySelector('ul').addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b || pdfBusy) return;
+      att[b.getAttribute('data-k')].splice(Number(b.getAttribute('data-i')), 1); renderAtt();
+    });
+  });
+  $('btn-pdf').onclick = function () {
+    if (pdfBusy) return;
+    var want = ym, jobs = [];
+    Object.keys(att).forEach(function (k) { att[k].forEach(function (f, i) { f.state = ''; jobs.push({ k: k, i: i + 1, f: f }); }); });
+    pdfBusy = true; $('btn-pdf').disabled = true; renderAtt();
+    setMsg('pdf-msg', '稼働費のPDFを保存中…', 'info');
+    call('exportPdf', { ym: want }, { timeoutMs: 90000 }).then(function () {
+      return jobs.reduce(function (p, j, n) {
+        return p.then(function () {
+          setMsg('pdf-msg', '稼働費のPDFを保存しました。添付を保存中…（' + (n + 1) + '/' + jobs.length + '）', 'info');
+          return call('saveAttachment', { ym: want, kind: j.k, index: j.i, mimeType: j.f.mimeType, data: j.f.data }, { retry: true, timeoutMs: 90000 })
+            .then(function () { j.f.state = 'ok'; renderAtt(); })
+            .catch(function (e) {
+              j.f.state = 'ng'; renderAtt();
+              throw new Error('稼働費のPDFは保存しました。' + KIND_LABEL[j.k] + 'の' + j.i + '件目で失敗しました：' + e.message + '（もう一度押すと、まとめて保存し直します）');
+            });
+        });
+      }, Promise.resolve());
+    }).then(function () {
+      setMsg('pdf-msg', '✅ ' + ymLabel(want) + '分を保存しました' + (jobs.length ? '（稼働費のPDFと添付' + jobs.length + '件）' : ''), 'ok');
+      att = { ETC: [], parking: [] }; renderAtt();
+    }).catch(function (e) { setMsg('pdf-msg', '❌ ' + e.message, 'ng'); })
+      .then(function () { pdfBusy = false; $('btn-pdf').disabled = false; });
+  };
+
+  // ── 住所さがし（自宅・場所で共通） ──
+  function finder(box, placeholder, onPick) {
+    box.innerHTML = '<div class="finder-row"><input type="search" placeholder="' + esc(placeholder) + '" enterkeyhint="search"><button type="button" class="btn sub">探す</button></div><ul class="cands"></ul><div class="msg"></div>';
+    var input = box.querySelector('input'), btn = box.querySelector('.btn'), ul = box.querySelector('.cands'), msg = box.querySelector('.msg');
+    function go() {
+      var q = input.value.trim();
+      if (!q) { setMsg(msg, '住所か店の名前を入れてください。', 'ng'); return; }
+      btn.disabled = true; setMsg(msg, '探しています…', 'info'); ul.innerHTML = ''; onPick('');
+      call('searchAddress', { query: q }, { retry: true }).then(function (list) {
+        if (!list.length) { setMsg(msg, '見つかりませんでした。市区町村から入れるか、店の名前に地名を足してください（例：イオン 大牟田）。', 'ng'); return; }
+        setMsg(msg, list.length > 1 ? '当てはまるものを選んでください。' : '合っていれば選んでください。', 'info');
+        ul.innerHTML = list.map(function (a) { return '<li><button type="button" aria-pressed="false">' + esc(a) + '</button></li>'; }).join('');
+      }).catch(function (e) { setMsg(msg, e.message, 'ng'); }).then(function () { btn.disabled = false; });
+    }
+    btn.onclick = go;
+    input.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    ul.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      Array.prototype.forEach.call(ul.querySelectorAll('button'), function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
+      setMsg(msg, '');
+      onPick(b.textContent);
+    });
+    return input;
+  }
+
+  // ── 自宅 ──
+  function renderHome(open) {
+    var box = $('home-box');
+    if (me.homeSet && !open) {
+      box.innerHTML = '<div class="home-now">' + esc(me.homeMasked) + '<small>登録済み（番地はここには出しません）</small></div>'
+        + '<button type="button" class="btn sub" style="margin-top:10px" id="home-change">自宅を変える</button>';
+      $('home-change').onclick = function () { renderHome(true); };
+      return;
+    }
+    var chosen = '';
+    box.innerHTML = '<p class="hint">自宅の住所を入れて「探す」を押し、出てきた住所を選んでください。</p><div id="home-finder"></div>'
+      + '<div class="pform row2" style="background:none;padding:0"><button type="button" class="btn" id="home-save" disabled>この住所を自宅にする</button>'
+      + (me.homeSet ? '<button type="button" class="btn sub" id="home-cancel">やめる</button>' : '') + '</div><div class="msg" id="home-msg"></div>';
+    var input = finder($('home-finder'), '例：福岡県飯塚市枝国1-2-3', function (a) { chosen = a; $('home-save').disabled = !a; });
+    if (open) input.focus();
+    if ($('home-cancel')) $('home-cancel').onclick = function () { renderHome(false); };
+    $('home-save').onclick = function () {
+      $('home-save').disabled = true; setMsg('home-msg', '保存しています…', 'info');
+      call('saveProfile', { homeAddress: chosen }).then(function (d) {
+        me = d; renderHome(false); renderSetup(); updateCalc();
+      }).catch(function (e) { setMsg('home-msg', e.message, 'ng'); $('home-save').disabled = false; });
+    };
+  }
+
+  // ── 場所 ──
+  function renderPlaces() {
+    var list = $('place-list');
+    list.innerHTML = me.places.length ? me.places.map(function (p) {
+      return '<div class="place" data-id="' + esc(p.id) + '"><div class="n">' + esc(p.name) + '</div><div class="ad">' + esc(p.address) + '</div>'
+        + '<div class="acts"><button type="button" class="btn sub" data-pedit="' + esc(p.id) + '">直す</button><button type="button" class="btn danger" data-pdel="' + esc(p.id) + '">削除</button></div><div class="pedit"></div></div>';
+    }).join('') : '<div class="empty" style="padding:12px 0">まだ登録がありません。</div>';
+  }
+  function placeForm(box, p, onDone, onCancel) {
+    var chosen = p ? p.address : '';
+    box.innerHTML = '<div class="pform"><label class="field-label" style="margin-top:0">名前（入力のときに出る名前）</label><input type="text" class="pf-name" maxlength="30" placeholder="例：イオン大牟田" value="' + esc(p ? p.name : '') + '">'
+      + '<label class="field-label">住所</label>' + (p ? '<div class="now">今の住所：' + esc(p.address) + '<br>変えるときだけ下で探してください。</div>' : '') + '<div class="pf-finder" style="margin-top:6px"></div>'
+      + '<div class="row2"><button type="button" class="btn pf-save">' + (p ? '保存' : '登録する') + '</button><button type="button" class="btn sub pf-cancel">やめる</button></div><div class="msg pf-msg"></div></div>';
+    var nameEl = box.querySelector('.pf-name'), save = box.querySelector('.pf-save'), msg = box.querySelector('.pf-msg');
+    finder(box.querySelector('.pf-finder'), '住所か店の名前（例：イオン大牟田）', function (a) { chosen = a || (p ? p.address : ''); });
+    nameEl.focus();
+    box.querySelector('.pf-cancel').onclick = onCancel;
+    save.onclick = function () {
+      var n = nameEl.value.trim();
+      if (!n) { setMsg(msg, '名前を入れてください。', 'ng'); return; }
+      if (!chosen) { setMsg(msg, '住所を探して、出てきた候補から選んでください。', 'ng'); return; }
+      save.disabled = true; setMsg(msg, '保存しています…', 'info');
+      call('savePlace', { id: p ? p.id : '', placeName: n, address: chosen }).then(function (places) {
+        var before = me.places.map(function (x) { return x.id; });
+        me.places = places;
+        var added = places.filter(function (x) { return before.indexOf(x.id) < 0; })[0];
+        renderPlaces(); renderRoute(); renderSetup(); updateCalc();
+        onDone(added || null);
+      }).catch(function (e) { setMsg(msg, e.message, 'ng'); save.disabled = false; });
+    };
+  }
+  $('btn-add-place').onclick = function () {
+    $('btn-add-place').hidden = true;
+    placeForm($('place-add'), null, function () { $('place-add').innerHTML = ''; $('btn-add-place').hidden = false; },
+      function () { $('place-add').innerHTML = ''; $('btn-add-place').hidden = false; });
+  };
+  $('place-list').addEventListener('click', function (e) {
+    var ed = e.target.closest('[data-pedit]'), dl = e.target.closest('[data-pdel]');
+    if (ed) {
+      var p = me.places.filter(function (x) { return x.id === ed.getAttribute('data-pedit'); })[0];
+      var box = ed.closest('.place').querySelector('.pedit');
+      placeForm(box, p, function () {}, function () { box.innerHTML = ''; });
+    } else if (dl) {
+      var q = me.places.filter(function (x) { return x.id === dl.getAttribute('data-pdel'); })[0];
+      if (!q || !confirm('「' + q.name + '」を削除しますか？（これまでの記録はそのまま残ります）')) return;
+      dl.disabled = true;
+      call('deletePlace', { id: q.id }).then(function (places) {
+        me.places = places;
+        stops = stops.map(function (s) { return s === q.id ? '' : s; });
+        renderPlaces(); renderRoute(); renderSetup(); updateCalc();
+      }).catch(function (err) { alert(err.message); dl.disabled = false; });
+    }
+  });
+
+  // 入力画面から開く「場所を登録」
+  function openSheet(i) {
+    sheetStopIndex = i;
+    $('sheet').hidden = false;
+    placeForm($('sheet-body'), null, function (added) {
+      if (added && sheetStopIndex >= 0) { stops[sheetStopIndex] = added.id; renderRoute(); updateCalc(); }
+      closeSheet();
+    }, closeSheet);
+  }
+  function closeSheet() { $('sheet').hidden = true; $('sheet-body').innerHTML = ''; sheetStopIndex = -1; }
+  $('sheet').addEventListener('click', function (e) { if (e.target === $('sheet')) closeSheet(); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('sheet').hidden) closeSheet(); });
+
+  // 氏名
+  $('btn-full-name').onclick = function () {
+    var v = $('full-name').value.trim();
+    $('btn-full-name').disabled = true;
+    call('saveProfile', { fullName: v }).then(function (d) { me = d; setMsg('full-name-msg', '✅ 保存しました', 'ok'); })
+      .catch(function (e) { setMsg('full-name-msg', e.message, 'ng'); }).then(function () { $('btn-full-name').disabled = false; });
+  };
+
+  // ── タブ ──
+  function switchTab(t) {
+    ['input', 'list', 'places'].forEach(function (k) {
+      $('page-' + k).classList.toggle('active', k === t);
+      $('tab-' + k).setAttribute('aria-selected', k === t ? 'true' : 'false');
+    });
+    $('actionbar').hidden = t !== 'input';
+    document.body.classList.toggle('has-actionbar', t === 'input');
+    try { history.replaceState(null, '', location.pathname + '?staff=' + encodeURIComponent(name) + (t === 'input' ? '' : '&tab=' + t)); } catch (e) {}
+  }
+  $('tabbar').addEventListener('click', function (e) { var b = e.target.closest('[data-tab]'); if (b && me) switchTab(b.getAttribute('data-tab')); });
+
+  start();
+})();
+</script>
+</body>
+</html>
