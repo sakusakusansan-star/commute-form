@@ -108,7 +108,8 @@
   .entry .a { font-size: 16px; font-weight: 900; font-variant-numeric: tabular-nums; }
   .entry .r { font-size: 13.5px; font-weight: 700; margin-top: 4px; line-height: 1.5; }
   .entry .x { font-size: 12px; color: var(--sg-mute); margin-top: 3px; line-height: 1.55; }
-  .entry .acts { display: flex; gap: 8px; margin-top: 8px; }
+  .entry .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .entry .acts .btn { flex: none; white-space: nowrap; }
   .entry .acts .btn { min-height: 38px; padding: 6px 14px; font-size: 13px; }
   .empty { text-align: center; color: var(--sg-mute); font-size: 14px; padding: 26px 0; }
 
@@ -123,6 +124,18 @@
   .attach li .sz { color: var(--sg-mute); font-size: 12px; }
   .attach li .st { font-size: 12px; } .attach li .st.ok { color: var(--sg-green); } .attach li .st.ng { color: var(--sg-red); }
   .attach li button { border: 0; background: none; color: var(--sg-mute); font-size: 18px; padding: 2px 6px; }
+  .btn-attach[hidden] { display: none; }
+  .rc-btns { display: flex; gap: 8px; }
+  .rc-btns .btn-attach { flex: 1; font-size: 13.5px; }
+  .rc-btns.off .btn-attach { opacity: .45; pointer-events: none; }
+  .rc-mini { list-style: none; margin-top: 8px; }
+  .rc-mini li { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: var(--sg-surface); border: 1px solid var(--sg-hair); border-radius: 10px; margin-top: 5px; font-size: 12.5px; }
+  .rc-mini li .k { flex: none; font-weight: 800; color: var(--sg-teal); }
+  .rc-mini li .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sg-mute); }
+  .rc-mini li button { flex: none; border: 0; background: none; color: var(--sg-mute); font-size: 17px; padding: 0 4px; }
+  .entry .acts .btn.add { background: var(--sg-teal-tint); color: var(--sg-teal); }
+  .orphans { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--sg-hair2); }
+  .orphans .t { font-size: 12px; font-weight: 800; color: var(--sg-mute); }
 
   /* 住所さがし */
   .finder-row { display: flex; gap: 8px; }
@@ -206,6 +219,15 @@
           <div class="one"><label class="field-label" for="note">備考（なくてもよい）</label><input type="text" id="note" maxlength="200" placeholder="例：春日に応援"></div>
         </div>
         <p class="hint" id="per-day" style="margin:8px 0 0;" hidden>何日か選んでいるときは、高速代・駐車場代は「1日あたり」です。</p>
+        <div id="rc-box" hidden>
+          <div class="field-label" style="margin-top:14px">領収書（写真かPDF・送信と一緒に保存）</div>
+          <div class="rc-btns" id="rc-btns">
+            <label class="btn-attach" id="rc-btn-parking" for="rc-parking"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> 駐車場の領収書</label><input type="file" id="rc-parking" accept="application/pdf,image/*" multiple hidden>
+            <label class="btn-attach" id="rc-btn-toll" for="rc-toll"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> 高速の領収書</label><input type="file" id="rc-toll" accept="application/pdf,image/*" multiple hidden>
+          </div>
+          <div class="attach" style="margin:0"><ul id="rc-list"></ul></div>
+          <p class="hint" id="rc-hint" style="margin:8px 0 0"></p>
+        </div>
       </div>
 
       <div class="calc wait" id="calc">行き先を選ぶと、距離と金額がここに出ます。</div>
@@ -216,22 +238,21 @@
     <section id="page-list" class="page" aria-labelledby="tab-list">
       <div class="month-bar"><button type="button" class="m-prev" aria-label="前の月">‹</button><div class="t m-title"></div><button type="button" class="m-next" aria-label="次の月">›</button></div>
       <div class="total"><div><div class="k">この月の合計</div><div class="s" id="tot-sub">—</div></div><div class="v" id="tot-v">¥0</div></div>
-      <div class="card"><div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg> 入力した日</div><div id="entries"><div class="empty">読み込み中…</div></div></div>
+      <div class="card"><div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg> 入力した日</div><div class="msg" id="list-msg" style="margin:0 0 8px"></div><div id="entries"><div class="empty">読み込み中…</div></div></div>
+      <div class="card">
+        <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> ETCの利用明細（月に1回）</div>
+        <p class="hint">ETCで払った高速代は、領収書の代わりにETCの利用明細（PDFかスクリーンショット）をここに足してください。</p>
+        <div class="attach" style="margin:0"><ul id="etc-list"></ul></div>
+        <label class="btn-attach" for="etc-add" style="margin-top:8px">＋ ETCの利用明細を追加</label><input type="file" id="etc-add" accept="application/pdf,image/*" multiple hidden>
+        <div class="msg" id="etc-msg"></div>
+      </div>
       <div class="card">
         <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> 月末の提出（PDF）</div>
-        <p class="hint">この月の稼働費をPDFにしてGoogleドライブに保存します。ETCの利用明細や駐車場の領収書も添付すると、同じ月のフォルダに一緒に入ります。</p>
-        <div class="attach" data-kind="ETC">
-          <label class="btn-attach" for="att-ETC"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> ETCの利用明細を添付</label>
-          <input type="file" id="att-ETC" accept="application/pdf,image/*" multiple hidden><ul></ul>
-        </div>
-        <div class="attach" data-kind="parking">
-          <label class="btn-attach" for="att-parking"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5l-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></svg> 駐車場の領収書を添付</label>
-          <input type="file" id="att-parking" accept="application/pdf,image/*" multiple hidden><ul></ul>
-        </div>
-        <div class="msg ng" id="att-msg"></div>
-        <button type="button" class="btn wide" id="btn-pdf"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> <span id="btn-pdf-label">PDFをGoogleドライブへ保存</span></button>
+        <p class="hint">この月の稼働費をPDFにしてGoogleドライブに保存します。領収書とETCの明細は、送った時点で同じ月のフォルダに入っています。</p>
+        <button type="button" class="btn wide" id="btn-pdf"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg> PDFをGoogleドライブへ保存</button>
         <div class="msg" id="pdf-msg"></div>
       </div>
+      <input type="file" id="rc-later" accept="application/pdf,image/*" multiple hidden>
     </section>
 
     <!-- 自宅と場所 -->
@@ -342,7 +363,6 @@
       $('state').hidden = true; $('app').hidden = false; $('tabbar').hidden = false;
       renderNotice(now);
       renderAll();
-      renderAtt();
       $('actionbar').hidden = false;
       var t = new URLSearchParams(location.search).get('tab');
       switchTab(t === 'list' || t === 'places' ? t : 'input');
@@ -424,6 +444,7 @@
     var n = Object.keys(picked).length;
     $('days-info').textContent = n ? n + '日を選んでいます' + (Object.keys(picked).some(function (d) { return f[d]; }) ? '（入力済みの日は上書きします）' : '') : '';
     $('per-day').hidden = n < 2;
+    updateReceiptBox();
     updateSaveButton();
   }
   $('cal').addEventListener('click', function (e) {
@@ -469,11 +490,63 @@
     $('hw-yes').setAttribute('aria-pressed', v ? 'true' : 'false');
     $('toll-box').hidden = !v;
     if (!v) $('toll').value = '';
+    updateReceiptBox();
     updateCalc();
   }
   $('hw-no').onclick = function () { setHighway(false); };
   $('hw-yes').onclick = function () { setHighway(true); };
-  ['toll', 'parking'].forEach(function (id) { $(id).addEventListener('input', function () { drawCalc(); updateSaveButton(); }); });
+  ['toll', 'parking'].forEach(function (id) { $(id).addEventListener('input', function () { updateReceiptBox(); drawCalc(); updateSaveButton(); }); });
+
+  // ── その日の領収書（送信と一緒に保存） ──
+  var rcQueue = [];   // { kind, f: 読み込んだファイル, uploadId }
+  function receiptKinds() {
+    var k = [];
+    if (amount('parking') > 0) k.push('parking');
+    if (highway && amount('toll') > 0) k.push('toll');
+    return k;
+  }
+  function updateReceiptBox() {
+    var kinds = receiptKinds(), n = Object.keys(picked).length;
+    rcQueue = rcQueue.filter(function (r) { return kinds.indexOf(r.kind) >= 0; });
+    $('rc-box').hidden = !kinds.length;
+    $('rc-btn-parking').hidden = kinds.indexOf('parking') < 0;
+    $('rc-btn-toll').hidden = kinds.indexOf('toll') < 0;
+    $('rc-btns').classList.toggle('off', n > 1);
+    $('rc-hint').textContent = n > 1 ? '領収書は1日ずつ送るときに添付できます（あとで「一覧・提出」からその日に足せます）。'
+      : kinds.indexOf('toll') >= 0 ? 'ETCで払った高速代は領収書はいりません（月末にETCの利用明細を「一覧・提出」で足してください）。' : '';
+    $('rc-list').innerHTML = rcQueue.map(function (r, i) {
+      return '<li><span class="nm">' + esc(KIND_LABEL[r.kind] + '：' + r.f.name) + '</span><span class="sz">' + sizeText(r.f.size) + '</span><button type="button" data-rq="' + i + '" aria-label="外す">×</button></li>';
+    }).join('');
+  }
+  ['parking', 'toll'].forEach(function (k) {
+    var input = $('rc-' + k);
+    input.addEventListener('change', function () {
+      var files = Array.prototype.slice.call(input.files || []); input.value = '';
+      setMsg('save-msg', '');
+      files.reduce(function (p, file) {
+        return p.then(function () {
+          return readFile(file).then(function (f) { rcQueue.push({ kind: k, f: f, uploadId: GasClient.newId() }); updateReceiptBox(); updateSaveButton(); })
+            .catch(function (e) { setMsg('save-msg', file.name + '：' + e.message, 'ng'); });
+        });
+      }, Promise.resolve());
+    });
+  });
+  $('rc-list').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-rq]'); if (!b || saving) return;
+    rcQueue.splice(Number(b.getAttribute('data-rq')), 1); updateReceiptBox(); updateSaveButton();
+  });
+  function uploadAll(items, where) {
+    // 1件ずつ送る（まとめると大きくなりすぎて通信が切れやすい）。uploadId があるので送り直しても増えない
+    return items.reduce(function (p, it, i) {
+      return p.then(function () {
+        if (it.done) return;
+        if (where.progress) where.progress(i + 1, items.length);
+        return call('addAttachment', Object.assign({ kind: it.kind, uploadId: it.uploadId, mimeType: it.f.mimeType, data: it.f.data }, where.at(it)), { retry: true, timeoutMs: 90000 })
+          .then(function () { it.done = true; })
+          .catch(function (e) { e.message = KIND_LABEL[it.kind] + '（' + it.f.name + '）を保存できませんでした：' + e.message; throw e; });
+      });
+    }, Promise.resolve());
+  }
 
   function amount(id) { var v = $(id).value.trim(); return v === '' ? 0 : Number(v); }
   function amountsOk() {
@@ -515,9 +588,10 @@
 
   function updateSaveButton() {
     var n = Object.keys(picked).length, b = $('btn-save');
-    var ok = !!preview && n > 0 && routeReady() && amountsOk() && !saving;
+    var tooMany = rcQueue.length > 0 && n > 1;
+    var ok = !!preview && n > 0 && routeReady() && amountsOk() && !saving && !tooMany;
     b.disabled = !ok;
-    b.textContent = saving ? '送信中…' : n ? n + '日分を送信する' : '日付を選んでください';
+    b.textContent = saving ? '送信中…' : tooMany ? '領収書があるときは1日ずつ送ってください' : n ? n + '日分を送信する' + (rcQueue.length ? '（領収書' + rcQueue.length + '枚）' : '') : '日付を選んでください';
   }
 
   $('btn-save').onclick = function () {
@@ -531,9 +605,21 @@
       dates: days.map(function (d) { return ym + '-' + String(d).padStart(2, '0'); }),
       stops: routeStops(), highway: highway, toll: highway ? amount('toll') : 0, parking: amount('parking'), note: $('note').value.trim()
     }, { retry: true, timeoutMs: 60000 }).then(function (d) {
-      setMsg('save-msg', '✅ ' + d.saved + '日分を送信しました（' + d.route.text + '）', 'ok');
+      var msg = '✅ ' + d.saved + '日分を送信しました（' + d.route.text + '）';
+      var date = ym + '-' + String(days[0]).padStart(2, '0'), items = rcQueue.slice();
       picked = {}; $('note').value = '';
-      return loadMonth();
+      setMsg('save-msg', msg, 'ok');
+      return uploadAll(items, {
+        at: function () { return { date: date }; },
+        progress: function (i, n) { setMsg('save-msg', msg + '。領収書を保存中…（' + i + '/' + n + '）', 'info'); }
+      }).then(function () {
+        if (items.length) setMsg('save-msg', msg + '。領収書' + items.length + '枚も保存しました', 'ok');
+      }, function (e) {
+        setMsg('save-msg', '入力は送信しました。' + e.message + '　「一覧・提出」のその日から足し直せます。', 'ng');
+      }).then(function () {
+        rcQueue = []; updateReceiptBox();
+        return loadMonth();
+      });
     }).catch(function (e) {
       setMsg('save-msg', '❌ ' + e.message, 'ng');
     }).then(function () { saving = false; renderCal(); drawCalc(); updateSaveButton(); });
@@ -544,23 +630,71 @@
     var t = month.totals;
     $('tot-v').textContent = yen(t.total);
     $('tot-sub').innerHTML = esc(t.days + '日・' + km(t.km)) + '<br>' + esc('ガソリン代 ' + yen(t.gas) + (t.toll ? '・高速代 ' + yen(t.toll) : '') + (t.parking ? '・駐車場代 ' + yen(t.parking) : ''));
-    if (!month.entries.length) { $('entries').innerHTML = '<div class="empty">まだ入力がありません。</div>'; return; }
+    var files = month.files || [], byDate = {}, dates = {};
+    files.forEach(function (f) { if (f.date) (byDate[f.date] = byDate[f.date] || []).push(f); });
+    month.entries.forEach(function (e) { dates[e.date] = true; });
+    $('etc-list').innerHTML = files.filter(function (f) { return f.kind === 'ETC'; }).map(fileLi).join('');
+    var orphans = files.filter(function (f) { return f.date && !dates[f.date]; });
+    var orphanHtml = orphans.length ? '<div class="orphans"><div class="t">入力を消した日の領収書</div><ul class="rc-mini">' + orphans.map(function (f) { return miniLi(f, true); }).join('') + '</ul></div>' : '';
+    if (!month.entries.length) { $('entries').innerHTML = '<div class="empty">まだ入力がありません。</div>' + orphanHtml; return; }
     $('entries').innerHTML = month.entries.map(function (e) {
+      var rc = byDate[e.date] || [];
       var extra = [km(e.km) + (e.highway ? '（高速）' : ''), 'ガソリン代 ' + yen(e.gas)];
       if (e.toll) extra.push('高速代 ' + yen(e.toll));
       if (e.parking) extra.push('駐車場代 ' + yen(e.parking));
       return '<div class="entry' + (e.stops.length > 3 ? ' via' : '') + '"><div class="top"><span class="d">' + esc(dayText(e.date)) + '</span><span class="a">' + yen(e.total) + '</span></div>'
         + '<div class="r">' + esc(e.text) + '</div><div class="x">' + esc(extra.join('・')) + (e.note ? '<br>' + esc(e.note) : '') + '</div>'
-        + '<div class="acts"><button type="button" class="btn sub" data-edit="' + esc(e.id) + '">直す</button><button type="button" class="btn danger" data-del="' + esc(e.id) + '">削除</button></div></div>';
-    }).join('');
+        + (rc.length ? '<ul class="rc-mini">' + rc.map(function (f) { return miniLi(f); }).join('') + '</ul>' : '')
+        + '<div class="acts"><button type="button" class="btn sub" data-edit="' + esc(e.id) + '">直す</button><button type="button" class="btn danger" data-del="' + esc(e.id) + '">削除</button>'
+        + (e.parking ? '<button type="button" class="btn add" data-radd="parking" data-date="' + esc(e.date) + '">＋ 駐車場の領収書</button>' : '')
+        + (e.toll ? '<button type="button" class="btn add" data-radd="toll" data-date="' + esc(e.date) + '">＋ 高速の領収書</button>' : '')
+        + '</div></div>';
+    }).join('') + orphanHtml;
   }
+  function sizeText(n) { return n < 1048576 ? Math.max(1, Math.round(n / 1024)) + 'KB' : (n / 1048576).toFixed(1) + 'MB'; }
+  function miniLi(f, withDate) {
+    return '<li><span class="k">' + esc((withDate ? dayText(f.date) + ' ' : '') + (f.kind === 'toll' ? '高速' : '駐車場')) + '</span><span class="nm">' + esc(f.file) + '</span>'
+      + '<button type="button" data-fdel="' + esc(f.id) + '" aria-label="' + esc(f.file) + 'を消す">×</button></li>';
+  }
+  function fileLi(f) {
+    return '<li><span class="nm">' + esc(f.file) + '</span><button type="button" data-fdel="' + esc(f.id) + '" aria-label="' + esc(f.file) + 'を消す">×</button></li>';
+  }
+  function deleteFile(id, btn) {
+    var f = (month.files || []).filter(function (x) { return x.id === id; })[0];
+    if (!f || !confirm('「' + f.file + '」を消しますか？（Googleドライブからもゴミ箱へ移します）')) return;
+    btn.disabled = true;
+    call('deleteAttachment', { id: id }).then(loadMonth).catch(function (err) { alert(err.message); btn.disabled = false; });
+  }
+  $('etc-list').addEventListener('click', function (e) { var b = e.target.closest('[data-fdel]'); if (b) deleteFile(b.getAttribute('data-fdel'), b); });
+
+  // 一覧から足す（その日の領収書・ETC明細）。選んだらすぐ送る
+  var later = null;
+  function addNow(input, kind, at, msgId) {
+    var files = Array.prototype.slice.call(input.files || []); input.value = '';
+    if (!files.length) return;
+    var items = [];
+    setMsg(msgId, '読み込み中…', 'info');
+    files.reduce(function (p, file) {
+      return p.then(function () { return readFile(file).then(function (f) { items.push({ kind: kind, f: f, uploadId: GasClient.newId() }); }); });
+    }, Promise.resolve()).then(function () {
+      return uploadAll(items, { at: function () { return at; }, progress: function (i, n) { setMsg(msgId, '保存中…（' + i + '/' + n + '）', 'info'); } });
+    }).then(function () {
+      setMsg(msgId, '✅ ' + KIND_LABEL[kind] + 'を' + items.length + '件保存しました', 'ok');
+      return loadMonth();
+    }).catch(function (e) { setMsg(msgId, '❌ ' + e.message, 'ng'); loadMonth(); });
+  }
+  $('rc-later').addEventListener('change', function () { if (later) addNow($('rc-later'), later.kind, { date: later.date }, 'list-msg'); });
+  $('etc-add').addEventListener('change', function () { addNow($('etc-add'), 'ETC', { ym: ym }, 'etc-msg'); });
   $('entries').addEventListener('click', function (ev) {
+    var fd = ev.target.closest('[data-fdel]'), ra = ev.target.closest('[data-radd]');
+    if (fd) { deleteFile(fd.getAttribute('data-fdel'), fd); return; }
+    if (ra) { later = { kind: ra.getAttribute('data-radd'), date: ra.getAttribute('data-date') }; setMsg('list-msg', ''); $('rc-later').click(); return; }
     var ed = ev.target.closest('[data-edit]'), dl = ev.target.closest('[data-del]');
     var id = (ed || dl) && (ed || dl).getAttribute(ed ? 'data-edit' : 'data-del');
     var e = id && month.entries.filter(function (x) { return x.id === id; })[0];
     if (!e) return;
     if (dl) {
-      if (!confirm(dayText(e.date) + ' の入力を削除しますか？')) return;
+      if (!confirm(dayText(e.date) + ' の入力を削除しますか？' + ((month.files || []).some(function (f) { return f.date === e.date; }) ? '（この日の領収書は残ります。いらなければ×で消してください）' : ''))) return;
       dl.disabled = true;
       call('deleteEntry', { id: id }).then(loadMonth).catch(function (err) { alert(err.message); dl.disabled = false; });
       return;
@@ -582,10 +716,9 @@
     window.scrollTo(0, 0);
   });
 
-  // ── 添付と PDF ──
-  var ATT_MAX_SIDE = 2000, ATT_Q = 0.85, ATT_MAX_BYTES = 10 * 1024 * 1024, ATT_MAX = 10;
-  var KIND_LABEL = { ETC: 'ETC明細', parking: '駐車場の領収書' };
-  var att = { ETC: [], parking: [] }, pdfBusy = false;
+  // ── 添付の読み込みと PDF ──
+  var ATT_MAX_SIDE = 2000, ATT_Q = 0.85, ATT_MAX_BYTES = 10 * 1024 * 1024;
+  var KIND_LABEL = { ETC: 'ETCの利用明細', toll: '高速の領収書', parking: '駐車場の領収書' };
 
   function readFile(file) {
     return new Promise(function (resolve, reject) {
@@ -614,56 +747,12 @@
       r.readAsDataURL(file);
     });
   }
-  function renderAtt() {
-    Object.keys(att).forEach(function (k) {
-      var ul = document.querySelector('.attach[data-kind="' + k + '"] ul');
-      ul.innerHTML = att[k].map(function (f, i) {
-        var sz = f.size < 1048576 ? Math.max(1, Math.round(f.size / 1024)) + 'KB' : (f.size / 1048576).toFixed(1) + 'MB';
-        var st = f.state === 'ok' ? '<span class="st ok">保存済み</span>' : f.state === 'ng' ? '<span class="st ng">失敗</span>' : '';
-        return '<li><span class="nm">' + esc(f.name) + '</span><span class="sz">' + sz + '</span>' + st + '<button type="button" data-k="' + k + '" data-i="' + i + '" aria-label="' + esc(f.name) + 'を外す">×</button></li>';
-      }).join('');
-    });
-    var n = att.ETC.length + att.parking.length;
-    $('btn-pdf-label').textContent = n ? 'PDFと添付（' + n + '件）を保存' : 'PDFをGoogleドライブへ保存';
-  }
-  Array.prototype.forEach.call(document.querySelectorAll('.attach'), function (box) {
-    var k = box.getAttribute('data-kind'), input = box.querySelector('input');
-    input.addEventListener('change', function () {
-      setMsg('att-msg', ''); setMsg('pdf-msg', '');
-      var files = Array.prototype.slice.call(input.files || []); input.value = '';
-      if (att[k].length + files.length > ATT_MAX) { setMsg('att-msg', KIND_LABEL[k] + 'は' + ATT_MAX + '件までです。', 'ng'); files = files.slice(0, Math.max(0, ATT_MAX - att[k].length)); }
-      files.reduce(function (p, file) {
-        return p.then(function () { return readFile(file).then(function (f) { att[k].push(f); renderAtt(); }).catch(function (e) { setMsg('att-msg', file.name + '：' + e.message, 'ng'); }); });
-      }, Promise.resolve());
-    });
-    box.querySelector('ul').addEventListener('click', function (e) {
-      var b = e.target.closest('button'); if (!b || pdfBusy) return;
-      att[b.getAttribute('data-k')].splice(Number(b.getAttribute('data-i')), 1); renderAtt();
-    });
-  });
   $('btn-pdf').onclick = function () {
-    if (pdfBusy) return;
-    var want = ym, jobs = [];
-    Object.keys(att).forEach(function (k) { att[k].forEach(function (f, i) { f.state = ''; jobs.push({ k: k, i: i + 1, f: f }); }); });
-    pdfBusy = true; $('btn-pdf').disabled = true; renderAtt();
-    setMsg('pdf-msg', '稼働費のPDFを保存中…', 'info');
-    call('exportPdf', { ym: want }, { timeoutMs: 90000 }).then(function () {
-      return jobs.reduce(function (p, j, n) {
-        return p.then(function () {
-          setMsg('pdf-msg', '稼働費のPDFを保存しました。添付を保存中…（' + (n + 1) + '/' + jobs.length + '）', 'info');
-          return call('saveAttachment', { ym: want, kind: j.k, index: j.i, mimeType: j.f.mimeType, data: j.f.data }, { retry: true, timeoutMs: 90000 })
-            .then(function () { j.f.state = 'ok'; renderAtt(); })
-            .catch(function (e) {
-              j.f.state = 'ng'; renderAtt();
-              throw new Error('稼働費のPDFは保存しました。' + KIND_LABEL[j.k] + 'の' + j.i + '件目で失敗しました：' + e.message + '（もう一度押すと、まとめて保存し直します）');
-            });
-        });
-      }, Promise.resolve());
-    }).then(function () {
-      setMsg('pdf-msg', '✅ ' + ymLabel(want) + '分を保存しました' + (jobs.length ? '（稼働費のPDFと添付' + jobs.length + '件）' : ''), 'ok');
-      att = { ETC: [], parking: [] }; renderAtt();
-    }).catch(function (e) { setMsg('pdf-msg', '❌ ' + e.message, 'ng'); })
-      .then(function () { pdfBusy = false; $('btn-pdf').disabled = false; });
+    var want = ym, btn = $('btn-pdf');
+    btn.disabled = true; setMsg('pdf-msg', '稼働費のPDFを保存中…', 'info');
+    call('exportPdf', { ym: want }, { timeoutMs: 90000 }).then(function (d) {
+      setMsg('pdf-msg', '✅ ' + ymLabel(want) + '分のPDFを保存しました（' + d.name + '）', 'ok');
+    }).catch(function (e) { setMsg('pdf-msg', '❌ ' + e.message, 'ng'); }).then(function () { btn.disabled = false; });
   };
 
   // ── 住所さがし（自宅・場所で共通） ──

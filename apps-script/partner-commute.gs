@@ -11,7 +11,8 @@
 //  ・ガソリン代は 1km 15円。高速代・駐車場代は実費を入れる
 //  ・記録は「記録」シートに日ごとに1行ずつ残す（月を切り替えても消えない）
 //  ・PDFは Googleドライブ「経費精算/パートナー/2026年/12月/2026-12_鈴木_稼働費.pdf」
-//    ETCの明細・駐車場の領収書も同じフォルダに添付として保存する
+//    領収書（高速・駐車場）はその日の入力のときに都度、ETCの利用明細は月に1回、
+//    同じフォルダに足していく（2026-12-05_鈴木_駐車場.jpg、2026-12_鈴木_ETC.pdf）
 //  ・同じ区間の距離は「距離メモ」シートに覚えておき、毎回同じ距離になるようにする
 //
 //  【デプロイ】このスプレッドシート（パートナー_交通費）の Apps Script に貼り、
@@ -22,7 +23,7 @@
 // ============================================================
 
 var SHEET_ID = '19TTixFCWjVUR9S4XvsMjdbQt_U3v4MlCdvVpgTMsK_U';   // パートナー_交通費（12月〜）
-var CODE_VERSION = '2026-11-04';
+var CODE_VERSION = '2026-11-04b';
 var RATE_PER_KM = 15;
 
 // 名前 → { full: PDFに載せる氏名（本人が画面で登録すればそちらを使う）, from: この画面で入力できる最初の月 }
@@ -37,12 +38,13 @@ var PDF_FOLDER_ID = '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K';   // 経費精算/パ�
 var MAX_STOPS = 10;          // 1日の経路に入れられる地点の数（自宅を含む）
 var MAX_AMOUNT = 100000;     // 高速代・駐車場代の1日の上限（打ち間違い防止）
 
-var SH = { people: '人', places: '場所', records: '記録', memo: '距離メモ', pdf: 'PDF作成用' };
+var SH = { people: '人', places: '場所', records: '記録', memo: '距離メモ', files: '添付', pdf: 'PDF作成用' };
 var HEAD = {
   '人':      ['名前', '氏名', '自宅住所', '更新日時'],
   '場所':    ['ID', '名前', '場所名', '住所', '作成日時', '削除'],
   '記録':    ['ID', '名前', '日付', '経路', '経路の表示', '区間km', '距離km', '高速', 'ガソリン代', '高速代', '駐車場代', '合計', '備考', '更新日時'],
-  '距離メモ': ['キー', '出発', '到着', '高速', 'km', '日時']
+  '距離メモ': ['キー', '出発', '到着', '高速', 'km', '日時'],
+  '添付':    ['ID', '名前', '日付', '種類', 'ファイル名', 'ファイルID', '日時', '削除']
 };
 var R = { ID: 0, NAME: 1, DATE: 2, STOPS: 3, TEXT: 4, LEGS: 5, KM: 6, HW: 7, GAS: 8, TOLL: 9, PARK: 10, TOTAL: 11, NOTE: 12, AT: 13 };
 var WEEK = ['日', '月', '火', '水', '木', '金', '土'];
@@ -60,7 +62,7 @@ function sheet_(name) {
       sh.setFrozenRows(1);
     }
     // 日付は文字のまま持つ（「2026-12-01」を日付に変えられると読み書きがずれる）
-    if (name === SH.records) sh.getRange('C:C').setNumberFormat('@');
+    if (name === SH.records || name === SH.files) sh.getRange('C:C').setNumberFormat('@');
   }
   return sh;
 }
@@ -369,7 +371,7 @@ function totals_(list) {
 function listMonth_(name, ym) {
   checkMonth_(name, ym);
   var list = entriesOf_(name, ym);
-  return { ym: ym, entries: list, totals: totals_(list) };
+  return { ym: ym, entries: list, totals: totals_(list), files: filesOf_(name, ym) };
 }
 
 function deleteEntry_(name, id) {
@@ -431,7 +433,8 @@ function buildPdfSheet_(name, ym) {
   });
   values.push(['合計', '', '', t.km, t.gas, t.toll, t.parking, t.total, '']);
   values.push(['', '', '', '', '', '', '', '', '']);
-  values.push(['※月末締め、翌月3日までに申請。ETCの利用明細・駐車場の領収書は同じフォルダに保存。', '', '', '', '', '', '', '', '']);
+  var fl = filesOf_(name, ym), etc = fl.filter(function (f) { return f.kind === 'ETC'; }).length;
+  values.push(['※月末締め、翌月3日までに申請。添付（同じフォルダに保存）：ETCの利用明細 ' + etc + '件・領収書 ' + (fl.length - etc) + '枚', '', '', '', '', '', '', '', '']);
   sh.getRange(1, 1, values.length, W).setValues(values);
 
   var first = 6, last = 5 + list.length, sum = last + 1;
@@ -477,38 +480,70 @@ function exportPdf_(name, ym) {
   return { name: fileName };
 }
 
-// ── 添付（ETCの利用明細・駐車場の領収書） ─────────────────
-// 名前は 2026-12_鈴木_ETC.pdf、2件目からは _2。1件目を受け取ったときに、
-// その月・その人の同じ種類の古い添付をゴミ箱へ移す（送り直しても混ざらない）。
-var ATTACH_KINDS = { ETC: 'ETC', parking: '駐車場' };
+// ── 添付（その日の領収書・月のETC明細） ──────────────────
+// 足していく形（前の分は消さない）。名前は
+//   その日の領収書：2026-12-05_鈴木_駐車場.jpg（同じ日の2枚目から _2）
+//   ETCの利用明細：2026-12_鈴木_ETC.pdf（2件目から _2）
+// 画面が送る uploadId を「添付」シートに残し、通信のやり直しで同じものが2つできないようにする。
+var ATTACH_KINDS = { ETC: 'ETC', toll: '高速', parking: '駐車場' };
 var ATTACH_TYPES = { 'application/pdf': 'pdf', 'image/jpeg': 'jpg', 'image/png': 'png' };
 var ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+var F = { ID: 0, NAME: 1, DATE: 2, KIND: 3, FILE: 4, FILE_ID: 5, AT: 6, DEL: 7 };
 
-function saveAttachment_(name, ym, kind, index, mimeType, base64) {
-  checkMonth_(name, ym);
-  var label = ATTACH_KINDS[kind];
+function filesOf_(name, ym) {
+  return rows_(SH.files).filter(function (r) {
+    var d = dateText_(r[F.DATE]);
+    return r[F.NAME] === name && !r[F.DEL] && (d === ym || d.slice(0, 8) === ym + '-');
+  }).map(function (r) {
+    var d = dateText_(r[F.DATE]);
+    return { id: String(r[F.ID]), date: d.length > 7 ? d : '', kind: String(r[F.KIND]), file: String(r[F.FILE]) };
+  });
+}
+
+function addAttachment_(name, q) {
+  var kind = String(q.kind || ''), label = ATTACH_KINDS[kind];
   if (!label) throw new Error('添付の種類が分かりません: ' + kind);
-  var ext = ATTACH_TYPES[mimeType];
+  var day = '';
+  if (kind === 'ETC') day = checkMonth_(name, String(q.ym || ''));
+  else { day = checkDate_(q.date); checkMonth_(name, day.slice(0, 7)); }
+  var uploadId = String(q.uploadId || '');
+  if (!/^[\w-]{8,64}$/.test(uploadId)) throw new Error('送信IDが正しくありません。画面を開き直してください。');
+  var ext = ATTACH_TYPES[q.mimeType];
   if (!ext) throw new Error('PDFか写真（JPEG・PNG）を添付してください。');
-  index = Number(index);
-  if (!(index >= 1 && index <= 20 && Math.floor(index) === index)) throw new Error('添付の番号が正しくありません。');
-  var bytes = Utilities.base64Decode(String(base64 || ''));
+  var rs = rows_(SH.files);
+  for (var i = 0; i < rs.length; i++) {
+    if (String(rs[i][F.ID]) === uploadId && rs[i][F.NAME] === name) {
+      return { id: uploadId, file: String(rs[i][F.FILE]), again: true };   // 同じ送信のやり直し
+    }
+  }
+  var bytes = Utilities.base64Decode(String(q.data || ''));
   if (!bytes.length) throw new Error('添付ファイルが空です。');
   if (bytes.length > ATTACH_MAX_BYTES) throw new Error('添付ファイルが大きすぎます（10MBまで）。');
 
-  var folder = monthFolder_(ym);
-  var base = ym + '_' + name + '_' + label;
-  var fileName = base + (index > 1 ? '_' + index : '') + '.' + ext;
-  var stem = fileName.replace(/\.[^.]+$/, '');
-  var files = folder.getFiles();
-  while (files.hasNext()) {
-    var f = files.next();
-    var n = f.getName();
-    var sameKind = n.indexOf(base + '.') === 0 || n.indexOf(base + '_') === 0;
-    if (sameKind && (index === 1 || n.replace(/\.[^.]+$/, '') === stem)) f.setTrashed(true);
+  var folder = monthFolder_(day.slice(0, 7));
+  var base = day + '_' + name + '_' + label, fileName = '';
+  for (var n = 1; n <= 99; n++) {
+    var cand = base + (n > 1 ? '_' + n : '');
+    var taken = Object.keys(ATTACH_TYPES).some(function (t) { return folder.getFilesByName(cand + '.' + ATTACH_TYPES[t]).hasNext(); });
+    if (!taken) { fileName = cand + '.' + ext; break; }
   }
-  folder.createFile(Utilities.newBlob(bytes, mimeType, fileName));
-  return { name: fileName };
+  if (!fileName) throw new Error('この日の添付が多すぎます。');
+  var file = folder.createFile(Utilities.newBlob(bytes, q.mimeType, fileName));
+  sheet_(SH.files).appendRow([uploadId, name, day, kind, fileName, file.getId(), now_(), '']);
+  return { id: uploadId, file: fileName };
+}
+
+function deleteAttachment_(name, id) {
+  var rs = rows_(SH.files);
+  for (var i = 0; i < rs.length; i++) {
+    if (String(rs[i][F.ID]) === String(id) && rs[i][F.NAME] === name && !rs[i][F.DEL]) {
+      checkMonth_(name, dateText_(rs[i][F.DATE]).slice(0, 7));
+      try { DriveApp.getFileById(String(rs[i][F.FILE_ID])).setTrashed(true); } catch (e) {}   // 手で消してあっても続ける
+      sheet_(SH.files).getRange(i + 2, F.DEL + 1).setValue('削除');
+      return true;
+    }
+  }
+  throw new Error('消そうとした添付が見つかりません。一覧を読み直してください。');
 }
 
 // ── Webアプリ ───────────────────────────────────────────
@@ -546,7 +581,8 @@ function doPost(e) {
       case 'listMonth':     data = listMonth_(name, String(q.ym || '')); break;
       case 'deleteEntry':   data = deleteEntry_(name, q.id); break;
       case 'exportPdf':     data = exportPdf_(name, String(q.ym || '')); break;
-      case 'saveAttachment': data = saveAttachment_(name, String(q.ym || ''), q.kind, q.index, q.mimeType, q.data); break;
+      case 'addAttachment': data = addAttachment_(name, q); break;
+      case 'deleteAttachment': data = deleteAttachment_(name, q.id); break;
       case 'summary':       data = summary_(name, String(q.ym || '')); break;
       default: throw new Error('不明なaction: ' + q.action);
     }

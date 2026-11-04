@@ -60,6 +60,7 @@ global.Maps = {
 };
 
 // ── ドライブ・PDF・Webアプリのモック ──
+let fileSeq = 0; const allFiles = [];
 function Folder(name) {
   const f = { name, folders: [], files: [] };
   const it = a => { let i = 0; return { hasNext: () => i < a.length, next: () => a[i++] }; };
@@ -67,11 +68,12 @@ function Folder(name) {
   f.createFolder = n => { const c = Folder(n); f.folders.push(c); return c; };
   f.getFilesByName = n => it(f.files.filter(x => x.name === n && !x.trashed));
   f.getFiles = () => it(f.files.filter(x => !x.trashed));
-  f.createFile = b => { f.files.push({ name: b.name || b._name, trashed: false, getName() { return this.name; }, setTrashed(v) { this.trashed = v; } }); };
+  f.createFile = b => { const file = { id: 'file' + (++fileSeq), name: b.name || b._name, trashed: false, getId() { return this.id; }, getName() { return this.name; }, setTrashed(v) { this.trashed = v; } }; f.files.push(file); allFiles.push(file); return file; };
   return f;
 }
 const partnerRoot = Folder('パートナー');
-global.DriveApp = { getFolderById: id => { if (id !== '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K') throw new Error('nf'); return partnerRoot; } };
+global.DriveApp = { getFolderById: id => { if (id !== '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K') throw new Error('nf'); return partnerRoot; },
+  getFileById: id => { const f = allFiles.find(x => x.id === id); if (!f) throw new Error('nf'); return f; } };
 global.ScriptApp = { getOAuthToken: () => 't' };
 let pdfType = 'application/pdf';
 global.UrlFetchApp = { fetch: () => ({ getResponseCode: () => 200, getBlob: () => ({ getContentType: () => pdfType, setName(n) { this.name = n; return this; } }) }) };
@@ -189,18 +191,44 @@ ok('exportPdf', { ym: '2026-12' });
 assert.strictEqual(sheets['PDF作成用']._g[1][4], '山口 真人');
 assert.strictEqual(ok('init').homeSet, true, '氏名だけ直しても自宅は残る');
 
-// 8) 添付：ETC・駐車場、番号つき、送り直しで混ざらない
+// 8) 添付：その日の領収書・月のETC明細を足していく（前の分は消さない）
 const b64 = Buffer.from('x').toString('base64');
-assert.deepStrictEqual(ok('saveAttachment', { ym: '2026-12', kind: 'ETC', index: 1, mimeType: 'application/pdf', data: b64 }), { name: '2026-12_山口_ETC.pdf' });
-ok('saveAttachment', { ym: '2026-12', kind: 'ETC', index: 2, mimeType: 'image/jpeg', data: b64 });
-ok('saveAttachment', { ym: '2026-12', kind: 'parking', index: 1, mimeType: 'image/jpeg', data: b64 });
+const add = (o) => ok('addAttachment', Object.assign({ mimeType: 'image/jpeg', data: b64 }, o));
+assert.deepStrictEqual(add({ kind: 'parking', date: '2026-12-01', uploadId: 'up-0000001' }), { id: 'up-0000001', file: '2026-12-01_山口_駐車場.jpg' });
+add({ kind: 'parking', date: '2026-12-01', uploadId: 'up-0000002', mimeType: 'application/pdf' });
+add({ kind: 'toll', date: '2026-12-01', uploadId: 'up-0000003' });
+add({ kind: 'parking', date: '2026-12-05', uploadId: 'up-0000004' });
+add({ kind: 'ETC', ym: '2026-12', uploadId: 'up-0000005', mimeType: 'application/pdf' });
+add({ kind: 'ETC', ym: '2026-12', uploadId: 'up-0000006', mimeType: 'application/pdf' });
+// 通信のやり直し（同じ uploadId）では増えない
+assert.strictEqual(add({ kind: 'ETC', ym: '2026-12', uploadId: 'up-0000006', mimeType: 'application/pdf' }).again, true);
 const live = () => dec.files.filter(f => !f.trashed).map(f => f.name).sort();
-assert.deepStrictEqual(live(), ['2026-12_山口_ETC.pdf', '2026-12_山口_ETC_2.jpg', '2026-12_山口_稼働費.pdf', '2026-12_山口_駐車場.jpg']);
-ok('saveAttachment', { ym: '2026-12', kind: 'ETC', index: 1, mimeType: 'image/png', data: b64 });
-assert.deepStrictEqual(live(), ['2026-12_山口_ETC.png', '2026-12_山口_稼働費.pdf', '2026-12_山口_駐車場.jpg']);
-ng('saveAttachment', { ym: '2026-12', kind: 'x', index: 1, mimeType: 'image/png', data: b64 }, /種類/);
-ng('saveAttachment', { ym: '2026-12', kind: 'ETC', index: 1, mimeType: 'text/html', data: b64 }, /PDFか写真/);
-ng('saveAttachment', { ym: '2026-11', kind: 'ETC', index: 1, mimeType: 'image/png', data: b64 }, /前の画面/);
+assert.deepStrictEqual(live(), ['2026-12-01_山口_駐車場.jpg', '2026-12-01_山口_駐車場_2.pdf', '2026-12-01_山口_高速.jpg', '2026-12-05_山口_駐車場.jpg',
+  '2026-12_山口_ETC.pdf', '2026-12_山口_ETC_2.pdf', '2026-12_山口_稼働費.pdf']);
+let files = ok('listMonth', { ym: '2026-12' }).files;
+assert.deepStrictEqual(files.map(f => (f.date || '月') + ' ' + f.kind + ' ' + f.file), [
+  '2026-12-01 parking 2026-12-01_山口_駐車場.jpg', '2026-12-01 parking 2026-12-01_山口_駐車場_2.pdf', '2026-12-01 toll 2026-12-01_山口_高速.jpg',
+  '2026-12-05 parking 2026-12-05_山口_駐車場.jpg', '月 ETC 2026-12_山口_ETC.pdf', '月 ETC 2026-12_山口_ETC_2.pdf']);
+// 消す：ドライブのファイルもゴミ箱へ。消したあとに足すと、空いた名前を使う
+ok('deleteAttachment', { id: 'up-0000001' });
+assert.ok(!live().includes('2026-12-01_山口_駐車場.jpg'));
+assert.strictEqual(ok('listMonth', { ym: '2026-12' }).files.length, 5);
+assert.strictEqual(add({ kind: 'parking', date: '2026-12-01', uploadId: 'up-0000007' }).file, '2026-12-01_山口_駐車場.jpg');
+ng('deleteAttachment', { id: 'up-0000001' }, /見つかりません/);
+// PDFに添付の数が載る
+ok('exportPdf', { ym: '2026-12' });
+assert.ok(sheets['PDF作成用']._g.some(r => String(r[0]).includes('ETCの利用明細 2件・領収書 4枚')));
+// 確かめ
+ng('addAttachment', { kind: 'x', date: '2026-12-01', uploadId: 'up-0000008', mimeType: 'image/png', data: b64 }, /種類/);
+ng('addAttachment', { kind: 'parking', date: '2026-12-01', uploadId: 'up-0000008', mimeType: 'text/html', data: b64 }, /PDFか写真/);
+ng('addAttachment', { kind: 'parking', date: '2026-11-30', uploadId: 'up-0000008', mimeType: 'image/png', data: b64 }, /前の画面/);
+ng('addAttachment', { kind: 'parking', date: '2026-12-40', uploadId: 'up-0000008', mimeType: 'image/png', data: b64 }, /日付/);
+ng('addAttachment', { kind: 'parking', date: '2026-12-01', uploadId: 'x', mimeType: 'image/png', data: b64 }, /送信ID/);
+ng('addAttachment', { kind: 'parking', date: '2026-12-01', uploadId: 'up-0000008', mimeType: 'image/png', data: '' }, /空/);
+ng('addAttachment', { kind: 'ETC', ym: '2026-1', uploadId: 'up-0000008', mimeType: 'image/png', data: b64 }, /月の指定/);
+// ほかの人の添付は見えない・消せない
+assert.strictEqual(doPost({ postData: { contents: JSON.stringify({ action: 'listMonth', name: '鈴木', ym: '2026-12' }) } }).data.files.length, 0);
+assert.strictEqual(doPost({ postData: { contents: JSON.stringify({ action: 'deleteAttachment', name: '鈴木', id: 'up-0000002' }) } }).ok, false);
 
 // 9) 消す・みんなの状況用の集計・/exec
 ok('deleteEntry', { id: m.entries[0].id });
