@@ -702,7 +702,27 @@
     window.location.href = url.toString();
   }
 
+  // パートナー様は partner.html（自宅・場所を自分で登録する新しい画面）へ。
+  // 山口さんだけは 12月分から切り替え（11月分までは、この画面のシートに入っている）。
+  // 前の月の入力・PDFのために ?old=1 を付けて開いたときは、この画面のまま。
+  var PARTNER_NEW_FROM = { '山口': '2026-12' };
+  function partnerPageFor(name) {
+    var R = window.SiegRoster;
+    if (!R || !R.partners || new URLSearchParams(location.search).get('old') === '1') return '';
+    var n = normName(name), short = '';
+    R.partners.forEach(function(p) { if (normName(p) === n || (R.fullName(p) && normName(R.fullName(p)) === n)) short = p; });
+    if (!short) return '';
+    var from = PARTNER_NEW_FROM[short];
+    if (from) {
+      var d = new Date(), ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      if (!R.commutePartnerApi || ym < from) return '';
+    }
+    return 'partner.html?staff=' + encodeURIComponent(short);
+  }
+
   function startApp() {
+    var go = partnerPageFor(currentStaff);
+    if (go) { location.replace(go); return; }
     document.getElementById('staff-select-screen').classList.add('hidden');
     document.getElementById('main-app').style.display = 'block';
     document.getElementById('topbar-name').textContent = currentStaff;
