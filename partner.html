@@ -168,6 +168,7 @@
   .sheet h2 { font-size: 17px; font-weight: 900; margin-bottom: 4px; }
 
   #state { text-align: center; color: var(--sg-mute); font-size: 14px; padding: 40px 0; line-height: 1.7; }
+  #state:has(.sg-skel-wrap), #state:has(.sg-err) { padding: 12px 0; }
   @media (prefers-reduced-motion: no-preference) { .btn, .seg button, .cal-day { transition: transform .06s; } .btn:active { transform: scale(.985); } }
 </style>
 </head>
@@ -183,7 +184,7 @@
     <span class="sg-who" id="who" hidden><i id="who-i">?</i><span id="who-n"></span></span>
   </header>
 
-  <div id="state">読み込み中…</div>
+  <div id="state"><div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div></div>
 
   <div id="app" hidden>
     <div id="top-notice"></div>
@@ -369,7 +370,10 @@
       var t = new URLSearchParams(location.search).get('tab');
       switchTab(t === 'list' || t === 'places' ? t : 'input');
       loadMonth();
-    }).catch(function (e) { $('state').innerHTML = '読み込めませんでした：' + esc(e.message) + '<br><button class="btn" style="margin-top:12px" onclick="location.reload()">もう一度</button>'; });
+    }).catch(function (e) {
+      $('state').innerHTML = GasClient.errorHtml(e, '読み込めませんでした', 'もう一度読み込む');
+      $('state').querySelector('[data-sg-retry]').onclick = function () { location.reload(); };
+    });
   }
 
   function renderNotice(now) {
@@ -416,7 +420,7 @@
 
   function loadMonth() {
     var want = ym;
-    $('entries').innerHTML = '<div class="empty">読み込み中…</div>';
+    $('entries').innerHTML = '<div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div>';
     return call('listMonth', { ym: want }, { retry: true }).then(function (d) {
       if (want !== ym) return;
       month = d; renderCal(); renderList();
