@@ -88,8 +88,8 @@ const CONFIG = {
 };
 
 // ▼▼▼ PDFの保存先（Googleドライブ「経費精算」フォルダの中） ▼▼▼
-// 社員は「社員」、パートナーは「パートナー」フォルダに分けて、
-//   社員/2026年/10月/2026-10_福山_稼働費.pdf
+// 社員は「社員」、パートナーは「パートナー」フォルダに分けて、人ごとのフォルダに
+//   社員/福山/2026年/10月/2026-10_福山_稼働費.pdf
 // のように保存する（年・月のフォルダは無ければ自動で作る）。
 // 経費精算のGASも同じ場所・同じ名前の付け方なので、1つの月フォルダに両方が並ぶ。
 // パートナーが増えたら PARTNER_NAMES に名字を足す（鈴木・毛利・山内は先に入れてある）。
@@ -104,7 +104,7 @@ const SHORT_NAMES = ['福山', '古川', '清田', '福岡', '山口', '鈴木',
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
 // コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
-const CODE_VERSION = '2026-11-02b';
+const CODE_VERSION = '2026-11-06';
 
 // ── 年の判定 ─────────────────────────────────────────────────
 // 以前は年を 2026 に固定していたため、年をまたぐと
@@ -1198,7 +1198,8 @@ function pdfMonthFolder_(name, y, m) {
     throw new Error('PDF保存先フォルダにアクセスできません（' + (isPartner_(name) ? 'パートナー' : '社員')
       + '／ID: ' + id + '）。スクリプトの実行アカウントにこのフォルダの編集権限があるか確認してください。');
   }
-  return getOrCreateFolder_(getOrCreateFolder_(root, y + '年'), Number(m) + '月');
+  // 社員（またはパートナー）→ 人 → 年 → 月
+  return getOrCreateFolder_(getOrCreateFolder_(getOrCreateFolder_(root, shortName_(name)), y + '年'), Number(m) + '月');
 }
 
 function getOrCreateFolder_(parent, name) {

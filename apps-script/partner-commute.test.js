@@ -170,12 +170,12 @@ ng('nanika', {}, /不明なaction/);
 // 鈴木さんは月の制限なし
 assert.ok(doPost({ postData: { contents: JSON.stringify({ action: 'listMonth', name: '鈴木', ym: '2026-11' }) } }).ok);
 
-// 7) PDF：パートナー/2026年/12月/2026-12_山口_稼働費.pdf、表は日付順＋合計行
+// 7) PDF：パートナー/山口/2026年/12月/2026-12_山口_稼働費.pdf、表は日付順＋合計行
 let pdf = ok('exportPdf', { ym: '2026-12' });
 assert.strictEqual(pdf.name, '2026-12_山口_稼働費.pdf');
 ok('exportPdf', { ym: '2026-12' });
-const dec = partnerRoot.folders[0].folders[0];
-assert.strictEqual(partnerRoot.folders[0].name + '/' + dec.name, '2026年/12月');
+const dec = partnerRoot.folders[0].folders[0].folders[0];
+assert.strictEqual(partnerRoot.folders[0].name + '/' + partnerRoot.folders[0].folders[0].name + '/' + dec.name, '山口/2026年/12月');
 assert.deepStrictEqual(dec.files.filter(f => !f.trashed).map(f => f.name), ['2026-12_山口_稼働費.pdf']);
 const g = sheets['PDF作成用']._g;
 assert.strictEqual(g[1][4], '山口真人');

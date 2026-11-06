@@ -10,7 +10,7 @@
 //    「自宅 → A → B → 自宅」にできる。距離は区間ごとにGoogleマップで出して足す
 //  ・ガソリン代は 1km 15円。高速代・駐車場代は実費を入れる
 //  ・記録は「記録」シートに日ごとに1行ずつ残す（月を切り替えても消えない）
-//  ・PDFは Googleドライブ「経費精算/パートナー/2026年/12月/2026-12_鈴木_稼働費.pdf」
+//  ・PDFは Googleドライブ「経費精算/パートナー/鈴木/2026年/12月/2026-12_鈴木_稼働費.pdf」
 //    領収書（高速・駐車場）はその日の入力のときに都度、ETCの利用明細は月に1回、
 //    同じフォルダに足していく（2026-12-05_鈴木_駐車場.jpg、2026-12_鈴木_ETC.pdf）
 //  ・同じ区間の距離は「距離メモ」シートに覚えておき、毎回同じ距離になるようにする
@@ -25,7 +25,7 @@
 // ============================================================
 
 var SHEET_ID = '19TTixFCWjVUR9S4XvsMjdbQt_U3v4MlCdvVpgTMsK_U';   // パートナー_交通費（12月〜）
-var CODE_VERSION = '2026-11-06';
+var CODE_VERSION = '2026-11-06b';
 var RATE_PER_KM = 15;
 
 // 名前 → { full: PDFに載せる氏名（本人が画面で登録すればそちらを使う）, from: この画面で入力できる最初の月 }
@@ -484,14 +484,15 @@ function summary_(name, ym) {
 // ── PDF ─────────────────────────────────────────────────
 function pdfName_(name, ym, kind) { return ym + '_' + name + '_' + kind + '.pdf'; }
 
-function monthFolder_(ym) {
+function monthFolder_(name, ym) {
   var root;
   try {
     root = DriveApp.getFolderById(PDF_FOLDER_ID);
   } catch (err) {
     throw new Error('PDFの保存先（パートナー）フォルダにアクセスできません。スクリプトを実行するアカウントに編集権限があるか確認してください。');
   }
-  return folder_(folder_(root, ym.slice(0, 4) + '年'), Number(ym.slice(5)) + '月');
+  // パートナー → 人 → 年 → 月
+  return folder_(folder_(folder_(root, name), ym.slice(0, 4) + '年'), Number(ym.slice(5)) + '月');
 }
 
 function folder_(parent, name) {
@@ -562,7 +563,7 @@ function exportPdf_(name, ym) {
   var blob = res.getBlob();
   if (String(blob.getContentType() || '').indexOf('pdf') === -1) throw new Error('PDFではなくHTMLが返されました。デプロイの「実行するユーザー」を確認してください。');
   var fileName = pdfName_(name, ym, '稼働費');
-  var folder = monthFolder_(ym);
+  var folder = monthFolder_(name, ym);
   var old = folder.getFilesByName(fileName);
   while (old.hasNext()) old.next().setTrashed(true);
   folder.createFile(blob.setName(fileName));
@@ -609,7 +610,7 @@ function addAttachment_(name, q) {
   if (!bytes.length) throw new Error('添付ファイルが空です。');
   if (bytes.length > ATTACH_MAX_BYTES) throw new Error('添付ファイルが大きすぎます（10MBまで）。');
 
-  var folder = monthFolder_(day.slice(0, 7));
+  var folder = monthFolder_(name, day.slice(0, 7));
   var base = day + '_' + name + '_' + label, fileName = '';
   for (var n = 1; n <= 99; n++) {
     var cand = base + (n > 1 ? '_' + n : '');
