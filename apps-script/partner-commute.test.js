@@ -44,7 +44,8 @@ const DIST = {  // 片道（m）・高速あり/なし
   '福岡県飯塚市枝国1-2-3|福岡県大牟田市岬町3-4': [84987, 92011],
   '福岡県大牟田市岬町3-4|福岡県飯塚市枝国1-2-3': [85129, 91000],
   '福岡県大牟田市岬町3-4|福岡県春日市星見ヶ丘3丁目': [50050, 52030],
-  '福岡県春日市星見ヶ丘3丁目|福岡県飯塚市枝国1-2-3': [36107, 36107]
+  '福岡県春日市星見ヶ丘3丁目|福岡県飯塚市枝国1-2-3': [36107, 36107],
+  '福岡県春日市星見ヶ丘3丁目|福岡県大牟田市岬町3-4': [50100, 52000]
 };
 let mapCalls = 0;
 global.Maps = {
@@ -236,4 +237,50 @@ assert.deepStrictEqual(ok('summary', { ym: '2026-12' }), { ym: '2026-12', days: 
 ng('deleteEntry', { id: 'nai' }, /見つかりません/);
 assert.strictEqual(doGet().data.version, CODE_VERSION);
 assert.deepStrictEqual(doGet().data.partners, ['山口', '鈴木', '毛利', '山内']);
+
+// 10) 自宅を2つ（3つまで）登録して、入力のたびに選ぶ
+me = ok('init');
+assert.deepStrictEqual(me.homes.map(h => h.label + '|' + h.main), ['自宅|true']);
+ng('saveHome', { label: '自宅', address: '福岡県春日市星見ヶ丘3丁目' }, /もう使っています/);
+ng('saveHome', { label: 'イオン大牟田', address: '福岡県春日市星見ヶ丘3丁目' }, /稼働場所の名前/);
+ng('saveHome', { label: '', address: '福岡県春日市星見ヶ丘3丁目' }, /呼び名を入れて/);
+ng('saveHome', { label: '実家', address: 'どこにもない' }, /見つかりませんでした/);
+me = ok('saveHome', { label: '実家', address: '日本、〒816-0846 福岡県春日市星見ヶ丘3丁目' });
+assert.deepStrictEqual(me.homes.map(h => h.label + '|' + h.masked + '|' + h.main), ['自宅|福岡県飯塚市…|true', '実家|福岡県春日市…|false']);
+assert.ok(!JSON.stringify(me).includes('星見ヶ丘'), '番地は返さない');
+const jikka = me.homes[1].id;
+ng('savePlace', { placeName: '実家', address: '福岡県春日市星見ヶ丘3丁目' }, /自宅の呼び名/);
+// 実家から出て実家に帰る／いつもの自宅から出て実家に帰る
+pv = ok('previewRoute', { stops: ['home:' + jikka, aeon, 'home:' + jikka], highway: true });
+assert.strictEqual(pv.text, '実家 → イオン大牟田 → 実家');
+assert.strictEqual(pv.km, 50.1 + 50.1);
+pv = ok('previewRoute', { stops: ['home', aeon, 'home:' + jikka], highway: true });
+assert.strictEqual(pv.text, '自宅 → イオン大牟田 → 実家');
+ng('previewRoute', { stops: ['home:nai', aeon, 'home'] }, /登録されていない自宅/);
+s = ok('saveDays', { dates: ['2026-12-10'], stops: ['home:' + jikka, aeon, 'home:' + jikka], highway: true });
+assert.deepStrictEqual(ok('listMonth', { ym: '2026-12' }).entries.filter(e => e.date === '2026-12-10')[0].stops, ['実家', 'イオン大牟田', '実家']);
+// 「いつも」を実家にする → 'home' は実家
+me = ok('saveHome', { id: jikka, main: true });
+assert.deepStrictEqual(me.homes.map(h => h.label + '|' + h.main), ['自宅|false', '実家|true']);
+assert.strictEqual(me.homeMasked, '福岡県春日市…');
+assert.strictEqual(ok('previewRoute', { stops: ['home', aeon, 'home'], highway: true }).text, '実家 → イオン大牟田 → 実家');
+// 呼び名を変えても前の記録はそのまま
+me = ok('saveHome', { id: jikka, label: 'アパート' });
+assert.strictEqual(me.homes[1].label, 'アパート');
+assert.strictEqual(me.homes[1].main, true, '直しても「いつも」のまま');
+assert.deepStrictEqual(ok('listMonth', { ym: '2026-12' }).entries.filter(e => e.date === '2026-12-10')[0].stops, ['実家', 'イオン大牟田', '実家']);
+// 3つまで
+ok('saveHome', { label: '寮', address: '福岡県大牟田市岬町3-4' });
+ng('saveHome', { label: '別荘', address: '福岡県大牟田市岬町3-4' }, /3か所まで/);
+// 消す：いつもの自宅を消すと、残りの最初が「いつも」に。最後の1つは消せない
+me = ok('deleteHome', { id: jikka });
+assert.deepStrictEqual(me.homes.map(h => h.label + '|' + h.main), ['自宅|true', '寮|false']);
+me = ok('deleteHome', { id: me.homes[1].id });
+ng('deleteHome', { id: me.homes[0].id }, /1つ残して/);
+assert.strictEqual(sheets['人']._g.find(r => r[0] === '山口')[2], '福岡県飯塚市枝国1-2-3', '人シートの自宅住所はいつもの自宅');
+// 前のやり方（人シートだけ）で登録した人も、そのまま使えて、2つ目を足せる
+sheets['人']._g.push(['毛利', '', '福岡県飯塚市枝国1-2-3', new Date()]);
+const mouri = o => doPost({ postData: { contents: JSON.stringify(Object.assign({ name: '毛利' }, o)) } });
+assert.deepStrictEqual(mouri({ action: 'init' }).data.homes.map(h => h.label), ['自宅']);
+assert.deepStrictEqual(mouri({ action: 'saveHome', label: '実家', address: '福岡県春日市星見ヶ丘3丁目' }).data.homes.map(h => h.label + '|' + h.main), ['自宅|true', '実家|false']);
 console.log('partner-commute: all tests passed');

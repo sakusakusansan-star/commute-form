@@ -156,6 +156,7 @@
   .pform .now { font-size: 12.5px; color: var(--sg-mute); margin-top: 6px; }
   .pform .row2 { display: flex; gap: 8px; margin-top: 12px; }
   .pform .row2 .btn { flex: 1; }
+  .badge { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: var(--sg-blue-tint); color: var(--sg-blue); font-size: 11px; font-weight: 800; vertical-align: 2px; }
   .home-now { font-size: 15px; font-weight: 800; }
   .home-now small { display: block; font-size: 12px; font-weight: 600; color: var(--sg-mute); margin-top: 2px; }
 
@@ -312,6 +313,7 @@
   var month = null;              // listMonth の結果
   var picked = {};               // 選んでいる日 { 1: true }
   var stops = [''];              // 自宅と自宅のあいだの行き先（場所ID）
+  var startHome = '', endHome = '';   // 出発・帰りの自宅のID（'' はいつもの自宅）
   var highway = false;
   var preview = null, previewSeq = 0, previewTimer = 0;
   var saving = false, sheetStopIndex = -1;
@@ -461,20 +463,40 @@
     me.places.forEach(function (p) { html += '<option value="' + esc(p.id) + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name) + '</option>'; });
     return html + '<option value="__new">＋ 新しい場所を登録…</option>';
   }
+  function homeById(id) { return (me.homes || []).filter(function (h) { return h.id === id; })[0] || null; }
+  function mainHome() { return (me.homes || []).filter(function (h) { return h.main; })[0] || (me.homes || [])[0] || null; }
+  function homeRow(which) {
+    var cur = which === 'end' ? endHome : startHome, main = mainHome();
+    var label = which === 'end' ? '帰り' : '出発';
+    if ((me.homes || []).length < 2) return '<div class="stop"><span class="dot home">' + HOME_SVG + '</span><div class="fixed">' + esc(main ? main.label : '自宅') + '<small>' + label + '</small></div></div>';
+    return '<div class="stop"><span class="dot home">' + HOME_SVG + '</span><select class="home-sel" data-which="' + which + '" aria-label="' + label + 'の自宅">'
+      + me.homes.map(function (h) { return '<option value="' + esc(h.id) + '"' + ((cur || main.id) === h.id ? ' selected' : '') + '>' + esc(h.label) + '（' + label + '）' + (h.main ? '・いつも' : '') + '</option>'; }).join('') + '</select></div>';
+  }
   function renderRoute() {
-    var html = '<div class="stop"><span class="dot home">' + HOME_SVG + '</span><div class="fixed">自宅<small>出発</small></div></div>';
+    if (startHome && !homeById(startHome)) startHome = '';
+    if (endHome && !homeById(endHome)) endHome = '';
+    var html = homeRow('start');
     stops.forEach(function (s, i) {
       html += '<div class="stop"><span class="dot">' + (i + 1) + '</span><select data-i="' + i + '" aria-label="' + (i === 0 ? '行き先' : '経由地' + i) + '">' + placeOptions(s) + '</select>'
         + (i > 0 ? '<button type="button" class="rm" data-rm="' + i + '" aria-label="この経由地を外す">×</button>' : '') + '</div>';
     });
     if (stops.length < (me.maxStops || 10) - 2) html += '<button type="button" class="btn add-stop" id="add-stop">＋ 経由地を追加</button>';
-    html += '<div class="stop"><span class="dot home">' + HOME_SVG + '</span><div class="fixed">自宅<small>帰り</small></div></div>';
+    html += homeRow('end');
     $('route').innerHTML = html;
     var add = $('add-stop');
     if (add) add.onclick = function () { stops.push(''); renderRoute(); updateCalc(); var s = $('route').querySelectorAll('select'); s[s.length - 1].focus(); };
   }
   $('route').addEventListener('change', function (e) {
     var s = e.target.closest('select'); if (!s) return;
+    if (s.classList.contains('home-sel')) {
+      var v = s.value === (mainHome() || {}).id ? '' : s.value;
+      if (s.getAttribute('data-which') === 'start') {
+        if (endHome === startHome) endHome = v;   // 帰りが出発と同じだったら、帰りもそろえる
+        startHome = v;
+      } else endHome = v;
+      renderRoute(); setMsg('save-msg', ''); updateCalc();
+      return;
+    }
     var i = Number(s.getAttribute('data-i'));
     if (s.value === '__new') { s.value = stops[i]; openSheet(i); return; }
     stops[i] = s.value; setMsg('save-msg', ''); updateCalc();
@@ -552,7 +574,8 @@
   function amountsOk() {
     return ['toll', 'parking'].every(function (id) { var n = amount(id); return isFinite(n) && n >= 0 && Math.floor(n) === n && n <= 100000; });
   }
-  function routeStops() { return ['home'].concat(stops).concat(['home']); }
+  function homeStop(id) { return id ? 'home:' + id : 'home'; }
+  function routeStops() { return [homeStop(startHome)].concat(stops).concat([homeStop(endHome)]); }
   function routeReady() { return me.homeSet && stops.length && stops.every(function (s) { return !!s; }) && !stops.some(function (s, i) { return i && s === stops[i - 1]; }); }
 
   function updateCalc() {
@@ -702,6 +725,11 @@
     // 直す：入力画面にその日の内容を入れる（場所は今の一覧から名前で探す）
     picked = {}; picked[Number(e.date.slice(8))] = true;
     var missing = [];
+    function homeIdOf(label) {
+      var h = (me.homes || []).filter(function (x) { return x.label === label; })[0];
+      return h && !h.main ? h.id : '';
+    }
+    startHome = homeIdOf(e.stops[0]); endHome = homeIdOf(e.stops[e.stops.length - 1]);
     stops = e.stops.slice(1, -1).map(function (n) {
       var p = me.places.filter(function (x) { return x.name === n; })[0];
       if (!p) missing.push(n);
@@ -780,29 +808,78 @@
     return input;
   }
 
-  // ── 自宅 ──
-  function renderHome(open) {
+  // ── 自宅（3か所まで。呼び名をつけて、入力のたびに選ぶ） ──
+  function afterHomes(d) {
+    me = d;
+    renderHome(); renderRoute(); renderSetup(); updateCalc();
+  }
+  function renderHome() {
     var box = $('home-box');
-    if (me.homeSet && !open) {
-      box.innerHTML = '<div class="home-now">' + esc(me.homeMasked) + '<small>登録済み（番地はここには出しません）</small></div>'
-        + '<button type="button" class="btn sub" style="margin-top:10px" id="home-change">自宅を変える</button>';
-      $('home-change').onclick = function () { renderHome(true); };
+    if (!me.homeSet) {
+      // はじめての登録
+      var chosen = '';
+      box.innerHTML = '<p class="hint">自宅の住所を入れて「探す」を押し、出てきた住所を選んでください。</p><div id="home-finder"></div>'
+        + '<div class="pform row2" style="background:none;padding:0"><button type="button" class="btn" id="home-save" disabled>この住所を自宅にする</button></div><div class="msg" id="home-msg"></div>';
+      finder($('home-finder'), '例：福岡県飯塚市枝国1-2-3', function (a) { chosen = a; $('home-save').disabled = !a; });
+      $('home-save').onclick = function () {
+        $('home-save').disabled = true; setMsg('home-msg', '保存しています…', 'info');
+        call('saveHome', { label: '自宅', address: chosen }).then(afterHomes)
+          .catch(function (e) { setMsg('home-msg', e.message, 'ng'); $('home-save').disabled = false; });
+      };
       return;
     }
-    var chosen = '';
-    box.innerHTML = '<p class="hint">自宅の住所を入れて「探す」を押し、出てきた住所を選んでください。</p><div id="home-finder"></div>'
-      + '<div class="pform row2" style="background:none;padding:0"><button type="button" class="btn" id="home-save" disabled>この住所を自宅にする</button>'
-      + (me.homeSet ? '<button type="button" class="btn sub" id="home-cancel">やめる</button>' : '') + '</div><div class="msg" id="home-msg"></div>';
-    var input = finder($('home-finder'), '例：福岡県飯塚市枝国1-2-3', function (a) { chosen = a; $('home-save').disabled = !a; });
-    if (open) input.focus();
-    if ($('home-cancel')) $('home-cancel').onclick = function () { renderHome(false); };
-    $('home-save').onclick = function () {
-      $('home-save').disabled = true; setMsg('home-msg', '保存しています…', 'info');
-      call('saveProfile', { homeAddress: chosen }).then(function (d) {
-        me = d; renderHome(false); renderSetup(); updateCalc();
-      }).catch(function (e) { setMsg('home-msg', e.message, 'ng'); $('home-save').disabled = false; });
+    var many = me.homes.length > 1;
+    box.innerHTML = '<p class="hint">' + (many ? '入力のときに、出発と帰りの自宅を選べます。ふだん使う自宅を「いつも」にしておくと、最初から選ばれています。'
+        : '実家とアパートなど、行き来する自宅がある人は「自宅をもう1つ登録」で足せます。入力のときに選べるようになります。') + '</p>'
+      + me.homes.map(function (h) {
+        return '<div class="place" data-hid="' + esc(h.id) + '"><div class="n">' + esc(h.label) + (h.main && many ? ' <span class="badge">いつも</span>' : '') + '</div>'
+          + '<div class="ad">' + esc(h.masked) + '（番地はここには出しません）</div>'
+          + '<div class="acts"><button type="button" class="btn sub" data-hedit="' + esc(h.id) + '">直す</button>'
+          + (many && !h.main ? '<button type="button" class="btn sub" data-hmain="' + esc(h.id) + '">いつもにする</button>' : '')
+          + (many ? '<button type="button" class="btn danger" data-hdel="' + esc(h.id) + '">削除</button>' : '') + '</div><div class="hedit"></div></div>';
+      }).join('')
+      + (me.homes.length < (me.maxHomes || 3) ? '<button type="button" class="btn sub wide" id="home-add-btn" style="margin-top:10px">＋ 自宅をもう1つ登録（実家など）</button>' : '')
+      + '<div id="home-add"></div><div class="msg" id="home-msg"></div>';
+    var addBtn = $('home-add-btn');
+    if (addBtn) addBtn.onclick = function () {
+      addBtn.hidden = true;
+      homeForm($('home-add'), null, function () { $('home-add').innerHTML = ''; addBtn.hidden = false; });
     };
   }
+  function homeForm(box, h, onCancel) {
+    var chosen = '';
+    box.innerHTML = '<div class="pform"><label class="field-label" style="margin-top:0">呼び名（入力のときに出る名前）</label><input type="text" class="hf-label" maxlength="15" placeholder="例：実家、アパート" value="' + esc(h ? h.label : '') + '">'
+      + '<label class="field-label">住所</label>' + (h ? '<div class="now">今の住所：' + esc(h.masked) + '<br>引っ越したときだけ、下で新しい住所を探してください。</div>' : '') + '<div class="hf-finder" style="margin-top:6px"></div>'
+      + '<div class="row2"><button type="button" class="btn hf-save">' + (h ? '保存' : '登録する') + '</button><button type="button" class="btn sub hf-cancel">やめる</button></div><div class="msg hf-msg"></div></div>';
+    var labelEl = box.querySelector('.hf-label'), save = box.querySelector('.hf-save'), msg = box.querySelector('.hf-msg');
+    finder(box.querySelector('.hf-finder'), '例：熊本県熊本市中央区…', function (a) { chosen = a; });
+    labelEl.focus();
+    box.querySelector('.hf-cancel').onclick = onCancel;
+    save.onclick = function () {
+      var label = labelEl.value.trim();
+      if (!label) { setMsg(msg, '呼び名を入れてください（例：実家）。', 'ng'); return; }
+      if (!h && !chosen) { setMsg(msg, '住所を探して、出てきた候補から選んでください。', 'ng'); return; }
+      save.disabled = true; setMsg(msg, '保存しています…', 'info');
+      call('saveHome', { id: h ? h.id : '', label: label, address: chosen }).then(afterHomes)
+        .catch(function (e) { setMsg(msg, e.message, 'ng'); save.disabled = false; });
+    };
+  }
+  $('home-box').addEventListener('click', function (e) {
+    var ed = e.target.closest('[data-hedit]'), mn = e.target.closest('[data-hmain]'), dl = e.target.closest('[data-hdel]');
+    if (ed) {
+      var h = homeById(ed.getAttribute('data-hedit')), box = ed.closest('.place').querySelector('.hedit');
+      homeForm(box, h, function () { box.innerHTML = ''; });
+    } else if (mn) {
+      mn.disabled = true;
+      call('saveHome', { id: mn.getAttribute('data-hmain'), main: true }).then(function (d) { startHome = ''; endHome = ''; afterHomes(d); })
+        .catch(function (err) { setMsg('home-msg', err.message, 'ng'); mn.disabled = false; });
+    } else if (dl) {
+      var x = homeById(dl.getAttribute('data-hdel'));
+      if (!x || !confirm('「' + x.label + '」を削除しますか？（これまでの記録はそのまま残ります）')) return;
+      dl.disabled = true;
+      call('deleteHome', { id: x.id }).then(afterHomes).catch(function (err) { setMsg('home-msg', err.message, 'ng'); dl.disabled = false; });
+    }
+  });
 
   // ── 場所 ──
   function renderPlaces() {
