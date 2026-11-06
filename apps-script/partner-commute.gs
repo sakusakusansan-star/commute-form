@@ -14,6 +14,8 @@
 //    領収書（高速・駐車場）はその日の入力のときに都度、ETCの利用明細は月に1回、
 //    同じフォルダに足していく（2026-12-05_鈴木_駐車場.jpg、2026-12_鈴木_ETC.pdf）
 //  ・同じ区間の距離は「距離メモ」シートに覚えておき、毎回同じ距離になるようにする
+//  ・自宅は呼び名をつけて3か所まで登録できる（「自宅」シート）。入力のたびに出発・帰りの自宅を選ぶ。
+//    ふだんは「いつも」の自宅。引っ越したら新しい自宅を足して「いつも」にする（前の記録はそのまま）
 //
 //  【デプロイ】このスプレッドシート（パートナー_交通費）の Apps Script に貼り、
 //   ウェブアプリとしてデプロイ（実行するユーザー：自分／アクセス：全員）。
@@ -23,7 +25,7 @@
 // ============================================================
 
 var SHEET_ID = '19TTixFCWjVUR9S4XvsMjdbQt_U3v4MlCdvVpgTMsK_U';   // パートナー_交通費（12月〜）
-var CODE_VERSION = '2026-11-04b';
+var CODE_VERSION = '2026-11-06';
 var RATE_PER_KM = 15;
 
 // 名前 → { full: PDFに載せる氏名（本人が画面で登録すればそちらを使う）, from: この画面で入力できる最初の月 }
@@ -35,12 +37,14 @@ var PARTNERS = {
 };
 
 var PDF_FOLDER_ID = '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K';   // 経費精算/パートナー
+var MAX_HOMES = 3;           // 自宅は3か所まで（実家とアパートなど）
 var MAX_STOPS = 10;          // 1日の経路に入れられる地点の数（自宅を含む）
 var MAX_AMOUNT = 100000;     // 高速代・駐車場代の1日の上限（打ち間違い防止）
 
-var SH = { people: '人', places: '場所', records: '記録', memo: '距離メモ', files: '添付', pdf: 'PDF作成用' };
+var SH = { people: '人', homes: '自宅', places: '場所', records: '記録', memo: '距離メモ', files: '添付', pdf: 'PDF作成用' };
 var HEAD = {
   '人':      ['名前', '氏名', '自宅住所', '更新日時'],
+  '自宅':    ['ID', '名前', '呼び名', '住所', 'いつも', '登録日時', '削除'],
   '場所':    ['ID', '名前', '場所名', '住所', '作成日時', '削除'],
   '記録':    ['ID', '名前', '日付', '経路', '経路の表示', '区間km', '距離km', '高速', 'ガソリン代', '高速代', '駐車場代', '合計', '備考', '更新日時'],
   '距離メモ': ['キー', '出発', '到着', '高速', 'km', '日時'],
@@ -185,15 +189,19 @@ function legKm_(from, to, highway, memo) {
 }
 
 // stops：'home' か場所のID の並び → 名前と住所
+// 'home' はいつもの自宅、'home:ID' はその自宅
 function resolveStops_(name, stops) {
   if (!stops || !stops.length || stops.length < 2) throw new Error('経路は2か所以上にしてください。');
   if (stops.length > MAX_STOPS) throw new Error('経路に入れられるのは ' + MAX_STOPS + ' か所までです。');
-  var person = person_(name);
+  var homes = homesOf_(name);
   var places = placesOf_(name);
   var out = stops.map(function (s) {
-    if (s === 'home') {
-      if (!person.home) throw new Error('先に「設定」で自宅を登録してください。');
-      return { id: 'home', name: '自宅', address: person.home };
+    s = String(s || '');
+    if (s === 'home' || s.indexOf('home:') === 0) {
+      if (!homes.length) throw new Error('先に「自宅と場所」で自宅を登録してください。');
+      var h = s === 'home' ? mainHome_(homes) : homes.filter(function (x) { return 'home:' + x.id === s; })[0];
+      if (!h) throw new Error('登録されていない自宅が入っています。自宅を選び直してください。');
+      return { id: 'home:' + h.id, name: h.label, address: h.address };
     }
     for (var i = 0; i < places.length; i++) if (places[i].id === s) return places[i];
     throw new Error('登録されていない場所が入っています。場所を選び直してください。');
@@ -228,18 +236,32 @@ function person_(name) {
   return { row: 0, fullName: '', home: '' };
 }
 
+// 自宅（消していないもの）。「自宅」シートができる前に登録した人は、その住所を1つ目として扱う
+function homesOf_(name) {
+  var list = rows_(SH.homes).filter(function (r) { return r[1] === name && !r[6]; })
+    .map(function (r) { return { id: String(r[0]), label: String(r[2]), address: String(r[3]), main: !!r[4] }; });
+  if (!list.length) {
+    var p = person_(name);
+    if (p.home) list.push({ id: 'h0', label: '自宅', address: p.home, main: true, legacy: true });
+  }
+  return list;
+}
+function mainHome_(homes) { return homes.filter(function (h) { return h.main; })[0] || homes[0]; }
+
 function placesOf_(name) {
   return rows_(SH.places).filter(function (r) { return r[1] === name && !r[5]; })
     .map(function (r) { return { id: String(r[0]), name: String(r[2]), address: String(r[3]) }; });
 }
 
 function init_(name) {
-  var p = person_(name);
+  var p = person_(name), homes = homesOf_(name), main = homes.length ? mainHome_(homes) : null;
   return {
     name: name,
     fullName: p.fullName || PARTNERS[name].full || '',
-    homeSet: !!p.home,
-    homeMasked: maskAddress_(p.home),
+    homeSet: homes.length > 0,
+    homeMasked: main ? maskAddress_(main.address) : '',
+    homes: homes.map(function (h) { return { id: h.id, label: h.label, masked: maskAddress_(h.address), main: h === main }; }),
+    maxHomes: MAX_HOMES,
     places: placesOf_(name),
     rate: RATE_PER_KM,
     from: PARTNERS[name].from || '',
@@ -252,15 +274,82 @@ function saveProfile_(name, fullName, homeAddress) {
   var sh = sheet_(SH.people);
   var full = fullName === undefined || fullName === null ? p.fullName : String(fullName).trim();
   if (full.length > 30) throw new Error('氏名が長すぎます（30文字まで）。');
-  var home = p.home;
-  if (homeAddress !== undefined && homeAddress !== null && String(homeAddress).trim() !== '') {
-    home = cleanAddress_(homeAddress);
-    if (!geocode_(home).length) throw new Error('この住所はGoogleマップで見つかりませんでした。');
-  }
-  var row = [name, full, home, now_()];
+  var row = [name, full, p.home, now_()];
   if (p.row) sh.getRange(p.row, 1, 1, 4).setValues([row]);
   else sh.appendRow(row);
+  // 自宅の住所も渡されたら、いつもの自宅を登録する（1つ目）か、いつもの自宅の住所を直す
+  if (homeAddress !== undefined && homeAddress !== null && String(homeAddress).trim() !== '') {
+    var homes = homesOf_(name), main = homes.length ? mainHome_(homes) : null;
+    return saveHome_(name, { id: main ? main.id : '', label: main ? main.label : '自宅', address: homeAddress });
+  }
   return init_(name);
+}
+
+// 前のやり方（「人」シートの自宅住所）で登録した自宅を「自宅」シートに写す
+function migrateHome_(name) {
+  var homes = homesOf_(name);
+  if (homes.length === 1 && homes[0].legacy) {
+    sheet_(SH.homes).appendRow([homes[0].id, name, homes[0].label, homes[0].address, 'いつも', now_(), '']);
+  }
+}
+
+// 自宅を足す（id なし）か直す（id あり）。main: true で「いつも」にする
+function saveHome_(name, q) {
+  migrateHome_(name);
+  var label = String(q.label || '').trim(), id = String(q.id || '');
+  var homes = homesOf_(name), sh = sheet_(SH.homes), rs = rows_(SH.homes);
+  var me = id ? homes.filter(function (h) { return h.id === id; })[0] : null;
+  if (id && !me) throw new Error('直そうとした自宅が見つかりません。画面を開き直してください。');
+  if (!label) label = me ? me.label : homes.length ? '' : '自宅';
+  if (!label) throw new Error('呼び名を入れてください（例：実家、アパート）。');
+  if (label.length > 15) throw new Error('呼び名が長すぎます（15文字まで）。');
+  homes.forEach(function (h) { if (h.label === label && h.id !== id) throw new Error('「' + label + '」はもう使っています。別の呼び名にしてください。'); });
+  if (placesOf_(name).some(function (p) { return p.name === label; })) throw new Error('「' + label + '」は稼働場所の名前で使っています。別の呼び名にしてください。');
+  var address = q.address ? cleanAddress_(q.address) : (me ? me.address : '');
+  if (!address) throw new Error('住所を探して、出てきた候補から選んでください。');
+  if (q.address && !geocode_(address).length) throw new Error('この住所はGoogleマップで見つかりませんでした。');
+  var makeMain = !!q.main || !homes.length;
+  if (makeMain) rs.forEach(function (r, i) { if (r[1] === name && !r[6] && r[4]) sh.getRange(i + 2, 5).setValue(''); });
+  if (me) {
+    for (var i = 0; i < rs.length; i++) {
+      if (String(rs[i][0]) === id && rs[i][1] === name && !rs[i][6]) {
+        sh.getRange(i + 2, 3, 1, 2).setValues([[label, address]]);
+        if (makeMain) sh.getRange(i + 2, 5).setValue('いつも');
+      }
+    }
+  } else {
+    if (homes.length >= MAX_HOMES) throw new Error('自宅は' + MAX_HOMES + 'か所までです。使わなくなった自宅を消してから足してください。');
+    sh.appendRow([newId_(), name, label, address, makeMain ? 'いつも' : '', now_(), '']);
+  }
+  syncPersonHome_(name);
+  return init_(name);
+}
+
+function deleteHome_(name, id) {
+  migrateHome_(name);
+  var homes = homesOf_(name), rs = rows_(SH.homes), sh = sheet_(SH.homes);
+  if (homes.length < 2) throw new Error('自宅は1つ残してください。住所が変わったときは「直す」で直せます。');
+  for (var i = 0; i < rs.length; i++) {
+    if (String(rs[i][0]) === String(id) && rs[i][1] === name && !rs[i][6]) {
+      // 消しても、これまでの記録の経路はそのまま残る（記録には呼び名と住所を写してある）
+      sh.getRange(i + 2, 7).setValue('削除');
+      if (rs[i][4]) {
+        sh.getRange(i + 2, 5).setValue('');
+        var next = homesOf_(name)[0];
+        rows_(SH.homes).forEach(function (r, j) { if (String(r[0]) === next.id && r[1] === name && !r[6]) sh.getRange(j + 2, 5).setValue('いつも'); });
+      }
+      syncPersonHome_(name);
+      return init_(name);
+    }
+  }
+  throw new Error('消そうとした自宅が見つかりません。画面を開き直してください。');
+}
+
+// 「人」シートの自宅住所は、いつもの自宅にそろえておく（見る人のため）
+function syncPersonHome_(name) {
+  var p = person_(name), main = mainHome_(homesOf_(name));
+  if (p.row) sheet_(SH.people).getRange(p.row, 3).setValue(main ? main.address : '');
+  else sheet_(SH.people).appendRow([name, '', main ? main.address : '', now_()]);
 }
 
 function savePlace_(name, id, placeName, address) {
@@ -268,7 +357,7 @@ function savePlace_(name, id, placeName, address) {
   address = cleanAddress_(address);
   if (!placeName) throw new Error('場所の名前を入れてください。');
   if (placeName.length > 30) throw new Error('場所の名前が長すぎます（30文字まで）。');
-  if (placeName === '自宅') throw new Error('「自宅」は場所の名前に使えません（自宅は設定で登録します）。');
+  if (placeName === '自宅' || homesOf_(name).some(function (h) { return h.label === placeName; })) throw new Error('「' + placeName + '」は自宅の呼び名なので、場所の名前に使えません。');
   if (!address) throw new Error('住所を選んでください。');
   var mine = placesOf_(name);
   mine.forEach(function (p) {
@@ -573,6 +662,8 @@ function doPost(e) {
       case 'init':          data = init_(name); break;
       case 'searchAddress': data = geocode_(q.query); break;
       case 'saveProfile':   data = saveProfile_(name, q.fullName, q.homeAddress); break;
+      case 'saveHome':      data = saveHome_(name, q); break;
+      case 'deleteHome':    data = deleteHome_(name, q.id); break;
       case 'savePlace':     data = savePlace_(name, q.id || '', q.placeName, q.address); break;
       case 'deletePlace':   data = deletePlace_(name, String(q.id || '')); break;
       case 'previewRoute':  var r = route_(name, q.stops, !!q.highway);
