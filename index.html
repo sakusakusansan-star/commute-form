@@ -38,10 +38,8 @@
 
 
   .topbar { background: var(--sg-surface); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; box-shadow: var(--sg-lift); display: flex; justify-content: space-between; align-items: center; }
-  .load-error { margin: 10px 14px; padding: 12px 14px; border: 1px solid var(--sg-red); border-radius: 10px;
-    background: var(--sg-red-tint); color: var(--sg-red); font-size: 13px; line-height: 1.6; }
-  .load-error button { margin-top: 10px; padding: 8px 18px; border: 0; border-radius: 8px;
-    background: var(--sg-red); color: var(--sg-on-primary); font-size: 14px; }
+  /* 読み込みに失敗したときの案内（中身は sieg-theme.css の .sg-err） */
+  .load-error { margin: 0 0 10px; }
 
   .page { display: none; }
   .page.active { display: block; }
@@ -193,7 +191,7 @@
     <div>
       <div class="sg-eyebrow">Sieg 業務ポータル</div>
       <h1 class="sg-title">稼働費入力</h1>
-      <div class="sg-sub" id="topbar-month">読み込み中...</div>
+      <div class="sg-sub" id="topbar-month"><span class="sg-skel word" aria-label="読み込み中"></span></div>
     </div>
     <button type="button" class="sg-who" onclick="switchStaff()" aria-label="別の人に切り替える"><i id="who-initial">?</i><span id="topbar-name">—</span></button>
   </header>
@@ -301,7 +299,7 @@
   <div id="page-confirm" class="page">
     <div class="card">
       <div class="card-label">今月の入力一覧</div>
-      <div id="entry-list"><div class="empty-msg">読み込み中...</div></div>
+      <div id="entry-list"><div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div></div>
     </div>
   </div>
 
@@ -346,7 +344,7 @@
       <div class="place-list-toggle" onclick="togglePlaceList()">
         <span id="place-list-toggle-label">既存の場所を見る ▾</span>
       </div>
-      <div id="place-manage-list" style="display:none;"><div class="empty-msg">読み込み中...</div></div>
+      <div id="place-manage-list" style="display:none;"><div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div></div>
     </div>
   </div>
 
@@ -415,7 +413,9 @@
         if (err.transient && n < maxAttempts) {
           return wait(RETRY_WAIT_MS * n).then(function() { return attempt(n + 1); });
         }
-        throw new Error(finalErrorMessage(err, action, n));
+        var fin = new Error(finalErrorMessage(err, action, n));
+        fin.detail = finalErrorDetail(err, action, n);
+        throw fin;
       });
     }
     return attempt(1);
@@ -426,11 +426,14 @@
   }
 
   // 一時的な失敗（transient=true）だけが再試行の対象。
-  function transientError(message) { return taggedError(message, true); }
-  function permanentError(message) { return taggedError(message, false); }
-  function taggedError(message, transient) {
+  // message はスタッフ向けの短い案内、detail は管理者向けの詳しい理由（画面では「詳しく」の中）
+  function transientError(message, detail) { return taggedError(message, true, detail); }
+  function permanentError(message, detail) { return taggedError(message, false, detail); }
+  function setupError(detail) { return permanentError('いまは使えません（設定の確認が必要です）。管理者に知らせてください。', detail); }
+  function taggedError(message, transient, detail) {
     var err = new Error(message);
     err.transient = transient;
+    if (detail) err.detail = detail;
     return err;
   }
 
@@ -457,7 +460,7 @@
         // 応答が返らないまま放置すると接続が残り続けるので、明示的に打ち切る。
         if (controller) { try { controller.abort(); } catch (e) {} }
         // タイムアウトを自動で投げ直しても待ち時間が積み上がるだけなので再試行しない。
-        reject(permanentError('通信がタイムアウトしました（' + (timeoutMs/1000) + '秒）。'));
+        reject(permanentError('時間がかかりすぎたので止めました。電波のよいところで、もう一度お試しください。', '通信がタイムアウトしました（' + (timeoutMs/1000) + '秒）。'));
       });
       var status = 0, finalUrl = '';
       var options = { method: 'POST', body: body };
@@ -489,7 +492,7 @@
           if (settled) return;
           settled = true;
           clearDeadline();
-          reject(permanentError(describeFetchError(err)));
+          reject(permanentError('つながりませんでした。電波のよいところで、もう一度お試しください。', describeFetchError(err)));
         });
     });
   }
@@ -498,13 +501,14 @@
   // 一時的な404はスクリプト本体が動いた後で起きることがあるため、
   // 再試行しない操作では「もう一度押す前に結果を確認して」と伝える。
   function finalErrorMessage(err, action, attempts) {
-    if (!err.transient) return err.message;
-    if (RETRY_SAFE_ACTIONS[action]) {
-      return err.message + '自動で' + attempts + '回試しましたが復旧しませんでした。'
-        + '少し時間をおいて、もう一度お試しください。';
-    }
-    return err.message + 'この操作は自動でやり直すと二重に登録されるおそれがあるため、再試行していません。'
-      + 'サーバー側では処理が終わっている場合があるので、「確認・修正」タブで結果を確かめてから操作し直してください。';
+    if (!err.transient || RETRY_SAFE_ACTIONS[action]) return err.message;
+    return '登録できたかどうか分かりません。「確認・修正」タブで確かめてから、もう一度送ってください。';
+  }
+  function finalErrorDetail(err, action, attempts) {
+    var d = err.detail || '';
+    if (!err.transient) return d;
+    if (RETRY_SAFE_ACTIONS[action]) return d + '自動で' + attempts + '回試しましたが復旧しませんでした。';
+    return d + 'この操作は自動でやり直すと二重に登録されるおそれがあるため、再試行していません。';
   }
 
   // fetch自体が失敗した（サーバーの応答を受け取れなかった）ケースの説明。
@@ -527,33 +531,33 @@
   function describeNonJsonResponse(text, status, finalUrl) {
     var t = String(text == null ? '' : text);
     if (/accounts\.google\.com|ServiceLogin|アカウントの選択|Choose an account|ログイン/i.test(t)) {
-      return permanentError('Googleのログイン画面が返されました。GASの「デプロイを管理」→ アクセスできるユーザー を「全員」にして再デプロイしてください。');
+      return setupError('Googleのログイン画面が返されました。GASの「デプロイを管理」→ アクセスできるユーザー を「全員」にして再デプロイしてください。');
     }
     if (/承認が必要|Authorization is required|requires authorization/i.test(t)) {
-      return permanentError('GAS側の承認が未完了です。スクリプトエディタで関数を一度手動実行して権限を許可し、Webアプリを再デプロイしてください。');
+      return setupError('GAS側の承認が未完了です。スクリプトエディタで関数を一度手動実行して権限を許可し、Webアプリを再デプロイしてください。');
     }
     if (/権限|permission|アクセスできません|Access denied/i.test(t)) {
-      return permanentError('このGoogleアカウントにはWebアプリの実行権限がありません。デプロイ設定の「アクセスできるユーザー」を確認してください。');
+      return setupError('このGoogleアカウントにはWebアプリの実行権限がありません。デプロイ設定の「アクセスできるユーザー」を確認してください。');
     }
     // 結果を受け取る script.googleusercontent.com 側が一時的に落ちているだけのケース。
     // URLもデプロイも正しいので、「URLが古い」と案内してはいけない。
     if (isTransientGoogleFailure(status, finalUrl, t)) {
-      return transientError('Google側の一時的なエラー（' + (status || '応答なし') + '）で結果を受け取れませんでした。');
+      return transientError('Google側が一時的に不安定でした。少し待って、もう一度お試しください。', 'Google側の一時的なエラー（' + (status || '応答なし') + '）で結果を受け取れませんでした。');
     }
     // 「Script function not found: doPost」はURLの問題ではなく、デプロイ中の
     // バージョンが古くて doPost を含んでいない時に返る。URLを貼り替えても直らない
     // ので、URL切れ（ファイルが見つかりません）とは分けて案内する。
     if (/Script function not found/i.test(t)) {
-      return permanentError('デプロイされているコードが古く、doPost が見つかりません。'
+      return setupError('デプロイされているコードが古く、doPost が見つかりません。'
         + 'Apps Scriptの「デプロイを管理」→ 対象デプロイの鉛筆（編集）→ バージョンを「新バージョン」にしてデプロイし直してください（URLは変わりません）。');
     }
     if (/見つかりません|not found|does not exist|存在しません/i.test(t)) {
-      return permanentError('デプロイURLが見つかりません。最新のデプロイURL（末尾 /exec）をGAS_URLに設定してください。');
+      return setupError('デプロイURLが見つかりません。最新のデプロイURL（末尾 /exec）をGAS_URLに設定してください。');
     }
     if (/^\s*</.test(t)) {
-      return permanentError('サーバーがJSONではなくHTMLを返しました。デプロイ設定（アクセスできるユーザー＝全員／実行するユーザー＝自分）と、コード変更後の再デプロイを確認してください。');
+      return setupError('サーバーがJSONではなくHTMLを返しました。デプロイ設定（アクセスできるユーザー＝全員／実行するユーザー＝自分）と、コード変更後の再デプロイを確認してください。');
     }
-    return permanentError('サーバーの応答を解析できませんでした: ' + t.slice(0, 150));
+    return permanentError('応答を読み取れませんでした。少し待って、もう一度お試しください。', 'サーバーの応答を解析できませんでした: ' + t.slice(0, 150));
   }
 
   // リダイレクト先（googleusercontent）が404/5xxを返した＝Google側の一時障害。
@@ -630,10 +634,19 @@
   // alert は端末や自動操作で勝手に閉じられると何も残らず、
   // 「読み込み中...」のまま止まっているように見えてしまう。
   // 読み込み失敗は画面に居座るバナーで出し、その場でやり直せるようにする。
-  function showLoadError(message) {
+  // gas-client.js の GasClient.errorHtml と同じ形（このページは gas-client.js を読まないので、ここに小さく持つ）
+  var GasClientLite = {
+    errorHtml: function (err, title, retryLabel) {
+      var e = function (x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+      return '<div class="sg-err" role="alert"><b>' + e(title) + '</b>' + e(err.message)
+        + (err.detail ? '<details><summary>詳しく（管理者向け）</summary>' + e(err.detail) + '</details>' : '')
+        + (retryLabel ? '<button type="button" data-sg-retry>' + e(retryLabel) + '</button>' : '') + '</div>';
+    }
+  };
+  function showLoadError(message, detail) {
     var el = document.getElementById('load-error');
-    el.innerHTML = '読み込みエラー: ' + message
-      + '<br><button type="button" onclick="startApp()">もう一度読み込む</button>';
+    el.innerHTML = GasClientLite.errorHtml({ message: message, detail: detail }, '読み込めませんでした', 'もう一度読み込む');
+    el.querySelector('[data-sg-retry]').onclick = function () { startApp(); };
     el.style.display = 'block';
   }
 
@@ -655,7 +668,7 @@
       }
     }).catch(function(err) {
       document.getElementById('topbar-month').textContent = '読み込みエラー';
-      showLoadError(err.message);
+      showLoadError(err.message, err.detail);
     });
   }
 
@@ -677,7 +690,7 @@
     if (preList && preList.length) { render(preList); return; }
 
     callApi('getStaffList').then(render).catch(function(err) {
-      document.getElementById('ss-buttons').innerHTML = '<p style="color:var(--sg-on-primary);text-align:center;">読み込みエラー: ' + err.message + '</p>';
+      document.getElementById('ss-buttons').innerHTML = GasClientLite.errorHtml(err, '名前の一覧を読み込めませんでした', '');
     });
   }
 
@@ -729,7 +742,7 @@
     document.getElementById('who-initial').textContent = String(currentStaff || '?').charAt(0);
 
     var monthEl = document.getElementById('topbar-month');
-    monthEl.textContent = '読み込み中...';
+    monthEl.innerHTML = '<span class="sg-skel word" aria-label="読み込み中"></span>';
     hideLoadError();
     document.getElementById('irreg-rate-label').textContent = '自動計算される金額（距離 × ' + RATE_PER_KM + '円/km）';
 
@@ -766,7 +779,7 @@
         return;
       }
       monthEl.textContent = '読み込みエラー';
-      showLoadError(err.message);
+      showLoadError(err.message, err.detail);
     });
   }
 
@@ -1179,7 +1192,7 @@
   // ===== 確認・修正 =====
   function loadEntries() {
     var listEl = document.getElementById('entry-list');
-    listEl.innerHTML = '<div class="empty-msg">読み込み中...</div>';
+    listEl.innerHTML = '<div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div>';
     // 一覧はシートの月の分（GAS の getMyEntries はシートの月だけを返す）
     var sheetMonth = monthInfo ? monthInfo.month : calMonth;
     callApi('getMyEntries', { staffName: currentStaff }).then(function(entries) {
@@ -1213,7 +1226,8 @@
       });
       listEl.innerHTML = html;
     }).catch(function(err) {
-      listEl.innerHTML = '<div class="empty-msg">読み込みエラー: ' + err.message + '</div>';
+      listEl.innerHTML = GasClientLite.errorHtml(err, '読み込めませんでした', 'もう一度読み込む');
+      listEl.querySelector('[data-sg-retry]').onclick = function () { loadEntries(); };
     });
   }
 
@@ -1222,7 +1236,7 @@
     callApi('deleteNormalEntry', { staffName: currentStaff, day: day }).then(function() {
       loadEntries();
       callApi('getMonthInfo', { staffName: currentStaff }).then(function(info) { monthInfo = info; });
-    }).catch(function(err) { alert('削除エラー: ' + err.message); });
+    }).catch(function(err) { alert('削除できませんでした。' + err.message); });
   }
 
   function deleteIrregular(row) {
@@ -1233,7 +1247,7 @@
         monthInfo = info;
         document.getElementById('irreg-capacity').textContent = '枠: ' + info.irregularCount + '/' + info.irregularCapacity;
       });
-    }).catch(function(err) { alert('削除エラー: ' + err.message); });
+    }).catch(function(err) { alert('削除できませんでした。' + err.message); });
   }
 
   // ===== 設定 =====
@@ -1419,7 +1433,7 @@
 
   function loadPlaceManage() {
     var el = document.getElementById('place-manage-list');
-    el.innerHTML = '<div class="empty-msg">読み込み中...</div>';
+    el.innerHTML = '<div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div>';
     callApi('getPlaceListManage').then(function(list) {
       if (!list || !list.length) {
         el.innerHTML = '<div class="empty-msg">登録された場所がありません</div>';
@@ -1437,7 +1451,8 @@
       });
       el.innerHTML = html;
     }).catch(function(err) {
-      el.innerHTML = '<div class="empty-msg">読み込みエラー: ' + err.message + '</div>';
+      el.innerHTML = GasClientLite.errorHtml(err, '読み込めませんでした', 'もう一度読み込む');
+      el.querySelector('[data-sg-retry]').onclick = function () { loadPlaceManage(); };
     });
   }
 
@@ -1453,7 +1468,7 @@
       loadPlaceManage();
       refreshPlaceListForForm();
     }).catch(function(err) {
-      alert('保存エラー: ' + err.message);
+      alert('保存できませんでした。' + err.message);
       btn.disabled = false; btn.textContent = '保存';
     });
   }
@@ -1469,7 +1484,7 @@
       loadPlaceManage();
       refreshPlaceListForForm();
     }).catch(function(err) {
-      alert('削除エラー: ' + err.message);
+      alert('削除できませんでした。' + err.message);
       btn.disabled = false; btn.textContent = '削除';
     });
   }
