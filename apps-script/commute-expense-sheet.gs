@@ -104,7 +104,7 @@ const SHORT_NAMES = ['福山', '古川', '清田', '福岡', '山口', '鈴木',
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
 // コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
-const CODE_VERSION = '2026-11-06';
+const CODE_VERSION = '2026-11-07';
 
 // ── 年の判定 ─────────────────────────────────────────────────
 // 以前は年を 2026 に固定していたため、年をまたぐと
@@ -279,6 +279,7 @@ function updateMonth() {
   const res = ui.alert(`${year}年${month}月に更新`, `「${name}」を${year}年${month}月で更新します。\n既存データは上書きされます。よろしいですか？`, ui.ButtonSet.YES_NO);
   if (res !== ui.Button.YES) return;
 
+  archiveMonth_(name, sheet);   // 作り直す前に、今入っている月の分を履歴へ
   buildMonthRows(sheet, month, year);
   setupDropdowns(sheet);
   ui.alert(`✅ ${year}年${month}月のカレンダーを生成しました。\nC列で場所を選ぶと距離が自動で入ります。`);
@@ -682,7 +683,7 @@ function doGet(e) {
 // 2本同時に動くと、同じ行に書いたり別の行を消したりするため。
 var READ_ONLY_ACTIONS = {
   getStaffList: true, getInitialData: true, getMonthInfo: true,
-  getPlaceList: true, getPlaceListManage: true, getMyEntries: true
+  getPlaceList: true, getPlaceListManage: true, getMyEntries: true, getHistory: true
 };
 
 // ── Webアプリのエントリーポイント ───────────────────────────
@@ -731,6 +732,8 @@ function doPost(e) {
       data = deleteNormalEntry(req.staffName, req.day);
     } else if (action === 'deleteIrregularEntry') {
       data = deleteIrregularEntry(req.staffName, req.row);
+    } else if (action === 'getHistory') {
+      data = getHistoryWeb(req.staffName, req.ym);
     } else if (action === 'resetMonth') {
       data = resetMonthWeb(req.staffName, req.month);
     } else if (action === 'exportPdf') {
@@ -1016,9 +1019,13 @@ function submitIrregular(staffName, data) {
 // ── その月の入力済み一覧（通常＋イレギュラー） ───────────────
 function getMyEntries(staffName) {
   var sheet = getCommuteSheet(staffName);
-  var C = CONFIG.COL;
   var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
-  var daysInMonth = new Date(sheetYear_(sheet, month), month, 0).getDate();
+  return entriesOf_(sheet, new Date(sheetYear_(sheet, month), month, 0).getDate());
+}
+
+// シートに入っている1か月分（通常の日＋イレギュラー）
+function entriesOf_(sheet, daysInMonth) {
+  var C = CONFIG.COL;
 
   var range    = getIrregularRowRange();
   var firstRow = CONFIG.dataStartRow;
@@ -1107,6 +1114,7 @@ function resetMonthWeb(staffName, month) {
     throw new Error('月の指定が不正です');
   }
   var year = guessYear_(month);
+  archiveMonth_(staffName, sheet);   // 作り直す前に、今の月の分を履歴へ
   sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).setValue(month);
   buildMonthRows(sheet, month, year);
   setupDropdowns(sheet);
@@ -1129,6 +1137,7 @@ function exportCommutePdf(staffName) {
     existingFiles.next().setTrashed(true);
   }
   targetFolder.createFile(pdfBlob);
+  archiveMonth_(staffName, sheet);   // 提出した月の分を履歴にも残す
 
   return '保存完了';
 }
@@ -1268,4 +1277,87 @@ function exportCommuteSheetAsPdf(ss, sheet) {
       + 'そのアカウントのスプレッドシート閲覧権限を確認してください。');
   }
   return blob;
+}
+
+// ── 稼働費の履歴 ─────────────────────────────────────────────
+// スタッフのシートは1か月分しか持てないので、月を作り直す前とPDFを保存したときに、
+// その月の入力を「稼働費履歴」シートへ写しておく（みんなの状況で前の月を見るため）。
+// 同じ人・同じ月をもう一度写すときは、前の分を消してから入れ直す。空の月では前の記録を消さない。
+var HISTORY_SHEET = '稼働費履歴';
+var HISTORY_HEAD = ['年月', 'スタッフ', '種類', '日', '場所・内容', '高速', '高速代(行き)', '高速代(帰り)', '金額', '備考', '保存日時'];
+
+function ymStr_(y, m) { return y + '-' + (m < 10 ? '0' : '') + m; }
+// 年月のセル。文字で入れているが、日付に変わっていても読めるように
+function cellYm_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) return ymStr_(v.getFullYear(), v.getMonth() + 1);
+  return String(v || '').trim();
+}
+// シートのカレンダーが何年何月か（1日の行の日付。月のセルを先に書き換えていても、中身の月が分かる）
+function sheetCalendarYm_(sheet) {
+  var v = sheet.getRange(CONFIG.dataStartRow, CONFIG.COL.DATE).getValue();
+  if (v instanceof Date && !isNaN(v.getTime())) return { year: v.getFullYear(), month: v.getMonth() + 1 };
+  var month = Number(sheet.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+  if (!month) return null;
+  return { year: sheetYear_(sheet, month), month: month };
+}
+function historySheet_(ss) {
+  var sh = ss.getSheetByName(HISTORY_SHEET);
+  if (!sh) {
+    sh = ss.insertSheet(HISTORY_SHEET);
+    sh.appendRow(HISTORY_HEAD);
+    sh.setFrozenRows(1);
+  }
+  return sh;
+}
+
+function archiveMonth_(staffName, sheet) {
+  var cal = sheetCalendarYm_(sheet);
+  if (!cal) return 0;
+  var entries = entriesOf_(sheet, new Date(cal.year, cal.month, 0).getDate());
+  if (!entries.length) return 0;
+  var ym = ymStr_(cal.year, cal.month);
+  var sh = historySheet_(sheet.getParent());
+  var last = sh.getLastRow();
+  if (last > 1) {
+    var keys = sh.getRange(2, 1, last - 1, 2).getValues();
+    for (var i = keys.length - 1; i >= 0; i--) {
+      if (cellYm_(keys[i][0]) === ym && String(keys[i][1]) === staffName) sh.deleteRow(i + 2);
+    }
+  }
+  var now = new Date();
+  var rows = entries.map(function(e) {
+    return e.type === 'irregular'
+      ? [ym, staffName, 'イレギュラー', e.day || '', String(e.content || ''), '', '', '', Number(e.amount) || 0, String(e.note || ''), now]
+      : [ym, staffName, '通常', e.day, String(e.place || ''), String(e.highway || ''), Number(e.tollGo) || 0, Number(e.tollBack) || 0, Number(e.amount) || 0, '', now];
+  });
+  var start = sh.getLastRow() + 1;
+  sh.getRange(start, 1, rows.length, 1).setNumberFormat('@');   // 「2026-10」が日付に変わらないように
+  sh.getRange(start, 1, rows.length, HISTORY_HEAD.length).setValues(rows);
+  return rows.length;
+}
+
+// 履歴から、その人のその月（ym: 2026-10）を getMonthInfo・getMyEntries と同じ形で返す
+function getHistoryWeb(staffName, ym) {
+  getCommuteSheet(staffName);   // 名前の確認
+  ym = String(ym || '');
+  if (!/^\d{4}-\d{2}$/.test(ym)) throw new Error('年月の指定が正しくありません');
+  var out = { ym: ym, year: Number(ym.slice(0, 4)), month: Number(ym.slice(5)), found: false, entries: [], filledDays: [], irregularCount: 0 };
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HISTORY_SHEET);
+  if (!sh || sh.getLastRow() < 2) return out;
+  var vals = sh.getRange(2, 1, sh.getLastRow() - 1, HISTORY_HEAD.length).getValues();
+  vals.forEach(function(v) {
+    if (cellYm_(v[0]) !== ym || String(v[1]) !== staffName) return;
+    out.found = true;
+    if (String(v[2]) === 'イレギュラー') {
+      out.irregularCount++;
+      out.entries.push({ type: 'irregular', day: Number(v[3]) || null, content: String(v[4]), amount: Number(v[8]) || 0, note: String(v[9] || '') });
+    } else {
+      var d = Number(v[3]);
+      if (out.filledDays.indexOf(d) < 0) out.filledDays.push(d);
+      out.entries.push({ type: 'normal', day: d, place: String(v[4]), highway: String(v[5]), tollGo: Number(v[6]) || 0, tollBack: Number(v[7]) || 0, amount: Number(v[8]) || 0 });
+    }
+  });
+  out.filledDays.sort(function(a, b) { return a - b; });
+  out.entries.sort(function(a, b) { return (a.day || 99) - (b.day || 99); });
+  return out;
 }
