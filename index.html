@@ -351,6 +351,8 @@
 </div>
 
 <script src="sieg-nav.js"></script>
+<!-- 不具合の記録（GasClient.report）と、画面のプログラムが止まったときの記録のため。読めなくても画面は動く -->
+<script src="/sieg-portal/gas-client.js"></script>
 <script src="/sieg-portal/sieg-roster.js"></script>
 <script>
   // 福山・古川・清田は同じスプレッドシート（1つのGASデプロイ）に同居しているが、
@@ -415,6 +417,8 @@
         }
         var fin = new Error(finalErrorMessage(err, action, n));
         fin.detail = finalErrorDetail(err, action, n);
+        // 管理する人が気づけるように、エラー記録へ（ポータルの gas-client.js。読めていなければ何もしない）
+        if (window.GasClient && window.GasClient.report) window.GasClient.report(Object.assign(fin, { kind: err.transient ? 'google' : 'setup' }), { what: action });
         throw fin;
       });
     }
