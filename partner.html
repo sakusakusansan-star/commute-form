@@ -61,6 +61,31 @@
   .cal-legend { display: flex; justify-content: center; gap: 14px; margin-top: 8px; font-size: 11.5px; color: var(--sg-mute); }
   .cal-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--sg-green); margin-right: 5px; vertical-align: 1px; }
   .cal-legend b { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--sg-primary); margin-right: 5px; vertical-align: -1px; }
+  .cal-day.miss { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sg-red) 55%, transparent); }
+  .cal-day.miss.on { box-shadow: none; }
+  .cal-legend u { display: inline-block; width: 11px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sg-red) 55%, transparent); margin-right: 5px; vertical-align: -1px; text-decoration: none; }
+  .cal-legend [hidden] { display: none; }
+
+  /* 今月の合計・シフトからまとめて */
+  .isum[hidden], .fshift[hidden] { display: none; }
+  .isum { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--sg-surface); border-radius: 14px; padding: 11px 14px; margin-bottom: 10px; box-shadow: var(--sg-lift); font-size: 13.5px; font-weight: 800; }
+  .isum span small { color: var(--sg-mute); font-weight: 700; margin-left: 4px; }
+  .isum button { flex: none; border: 0; background: none; color: var(--sg-blue); font-size: 13px; font-weight: 800; padding: 4px 0; }
+  .fshift { background: var(--sg-surface); border-radius: 14px; padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--sg-lift); border: 2px solid color-mix(in srgb, var(--sg-blue) 30%, transparent); }
+  .fshift h2 { font-size: 15px; font-weight: 900; margin: 0 0 2px; display: flex; align-items: center; justify-content: space-between; }
+  .fshift h2 small { font-size: 12px; color: var(--sg-red); font-weight: 800; }
+  .fshift p { font-size: 12.5px; color: var(--sg-mute); margin: 0 0 8px; line-height: 1.6; }
+  .fs-row { display: grid; grid-template-columns: auto 4.6em 1fr; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--sg-hair2); }
+  .fs-row:first-of-type { border-top: 0; }
+  .fs-row input[type="checkbox"] { width: 22px; height: 22px; accent-color: var(--sg-primary); }
+  .fs-row .d { font-size: 13.5px; font-weight: 800; }
+  .fs-row .d small { display: block; font-size: 11px; color: var(--sg-mute); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 6em; }
+  .fs-row select { min-height: 42px; padding: 8px 10px; font-size: 14px; }
+  .fs-row.nomatch select { border-color: var(--sg-amber); }
+  .fs-send { width: 100%; margin-top: 10px; min-height: 48px; border: 0; border-radius: var(--sg-r-sm); background: var(--sg-primary); color: var(--sg-on-primary); font-size: 15px; font-weight: 800; }
+  .fs-send:disabled { opacity: .45; }
+  .fs-msg { font-size: 13px; margin-top: 8px; font-weight: 700; }
+  .fs-msg.ok { color: var(--sg-green); } .fs-msg.ng { color: var(--sg-red); }
   .days-info { text-align: center; font-size: 13px; font-weight: 700; color: var(--sg-blue); margin-top: 8px; min-height: 18px; }
 
   /* 経路 */
@@ -194,12 +219,14 @@
       <div id="setup-card"></div>
 
       <div class="month-bar"><button type="button" class="m-prev" aria-label="前の月">‹</button><div class="t m-title"></div><button type="button" class="m-next" aria-label="次の月">›</button></div>
+      <div class="isum" id="input-summary" hidden></div>
+      <section class="fshift" id="from-shift" hidden></section>
 
       <div class="card">
         <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M8 3v4M16 3v4M3 10h18"/></svg> 日付（同じ経路の日はまとめて選べます）</div>
-        <div class="cal-dow"><span class="sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span></div>
+        <div class="cal-dow"><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span><span class="sun">日</span></div>
         <div class="cal-grid" id="cal"></div>
-        <div class="cal-legend"><span><i></i>入力済み</span><span><b></b>選んでいる日</span></div>
+        <div class="cal-legend"><span><i></i>入力済み</span><span><b></b>選んでいる日</span><span id="legend-miss" hidden><u></u>シフトの日でまだ</span></div>
         <div class="days-info" id="days-info"></div>
       </div>
 
@@ -370,6 +397,7 @@
       var t = new URLSearchParams(location.search).get('tab');
       switchTab(t === 'list' || t === 'places' ? t : 'input');
       loadMonth();
+      loadShift();
     }).catch(function (e) {
       $('state').innerHTML = GasClient.errorHtml(e, '読み込めませんでした', 'もう一度読み込む');
       $('state').querySelector('[data-sg-retry]').onclick = function () { location.reload(); };
@@ -394,6 +422,7 @@
   // ── はじめに ──
   function renderSetup() {
     var box = $('setup-card');
+    renderFromShift();
     if (me.homeSet && me.places.length) { box.innerHTML = ''; return; }
     box.innerHTML = '<div class="notice"><b>はじめに</b><br>'
       + (me.homeSet ? '' : '① 自宅を登録してください。<br>')
@@ -413,7 +442,7 @@
     var next = addMonth(ym, n);
     if (next < minYm || next > maxYm) return;
     ym = next; picked = {}; month = null;
-    renderMonthBars(); renderCal(); updateCalc(); loadMonth();
+    renderMonthBars(); renderCal(); renderSummary(); renderFromShift(); updateCalc(); loadMonth();
   }
   Array.prototype.forEach.call(document.querySelectorAll('.m-prev'), function (b) { b.onclick = function () { changeMonth(-1); }; });
   Array.prototype.forEach.call(document.querySelectorAll('.m-next'), function (b) { b.onclick = function () { changeMonth(1); }; });
@@ -423,7 +452,7 @@
     $('entries').innerHTML = '<div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div>';
     return call('listMonth', { ym: want }, { retry: true }).then(function (d) {
       if (want !== ym) return;
-      month = d; renderCal(); renderList();
+      month = d; renderCal(); renderList(); renderSummary(); renderFromShift();
     }).catch(function (e) {
       if (want !== ym) return;
       $('entries').innerHTML = '<div class="empty" style="color:var(--sg-red)">読み込めませんでした：' + esc(e.message) + '</div>';
@@ -435,18 +464,138 @@
     return f;
   }
 
+  // ── 今月の合計（入力画面の上） ──
+  function renderSummary() {
+    var el = $('input-summary');
+    if (!month || !month.totals || !month.entries.length) { el.hidden = true; el.innerHTML = ''; return; }
+    var t = month.totals;
+    el.innerHTML = '<span>' + Number(ym.slice(5)) + '月の稼働費 ' + yen(t.total) + '<small>' + t.days + '日・' + km(t.km) + '</small></span><button type="button" id="isum-go">一覧を見る ›</button>';
+    el.hidden = false;
+    $('isum-go').onclick = function () { switchTab('list'); };
+  }
+
+  // ── シフト（パートナー用シフト表の、日ごとの現場） ──
+  var shifts = null;             // { '2026-11': { 4: 'イオン' } }
+  var fsPick = {}, fsLast = null;
+  function loadShift() {
+    if (!R || !R.shiftPartnerApi) return;
+    GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: name }, { retry: true }).then(function (r) {
+      if (!r || !r.ok) return;
+      var out = {};
+      (r.data || []).forEach(function (x) {
+        var k = x.year + '-' + String(x.month).padStart(2, '0'), o = out[k] = out[k] || {};
+        for (var d = Number(x.startDay); d <= Number(x.endDay); d++) o[d] = x.place || x.torihiki || '';
+      });
+      shifts = out; renderCal(); renderFromShift();
+    }).catch(function () {});
+  }
+  // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）。一覧を読み込むまでは出さない
+  function missDays(withToday) {
+    var sd = shifts && shifts[ym];
+    if (!sd || !month) return [];
+    var t = new Date(), now = ymOf(t);
+    if (ym > now) return [];
+    var limit = ym < now ? 99 : t.getDate() - (withToday ? 0 : 1), f = filled();
+    return Object.keys(sd).map(Number).filter(function (d) { return d <= limit && !f[d]; }).sort(function (a, b) { return a - b; });
+  }
+  // シフトの現場の書き方 → 登録した稼働場所（そろっていれば。あいまいなら空＝選んでもらう）
+  function normPlace(v) { return String(v || '').replace(/[\s　・･\-]/g, '').replace(/店$/, '').toLowerCase(); }
+  function matchPlace(text) {
+    var n = normPlace(text);
+    if (!n) return '';
+    var exact = me.places.filter(function (p) { return normPlace(p.name) === n; });
+    if (exact.length) return exact[0].id;
+    var part = me.places.filter(function (p) { var q = normPlace(p.name); return q && (q.indexOf(n) >= 0 || n.indexOf(q) >= 0); });
+    return part.length === 1 ? part[0].id : '';
+  }
+  function renderFromShift() {
+    var el = $('from-shift'), days = missDays(true);
+    if (!days.length || !me || !me.homeSet || !me.places.length) {
+      if (fsLast) { el.innerHTML = '<div class="fs-msg ' + fsLast.cls + '">' + esc(fsLast.text) + '</div>'; el.hidden = false; fsLast = null; return; }
+      el.hidden = true; el.innerHTML = ''; return;
+    }
+    var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5)), sd = shifts[ym];
+    var opts = function (sel) { return '<option value="">場所を選ぶ…</option>' + me.places.map(function (p) { return '<option value="' + esc(p.id) + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join(''); };
+    el.innerHTML = '<h2>シフトからまとめて入れる<small>まだ ' + days.length + '日</small></h2>'
+      + '<p>シフトの日で、まだ入れていない日です。自宅 → 場所 → 自宅 で入ります。高速・駐車場・経由地がある日は、チェックを外して下のカレンダーから入れてください。</p>'
+      + days.map(function (d) {
+        var k = ym + ':' + d, p = fsPick[k], mp = p ? p.place : matchPlace(sd[d]), on = p ? p.on : !!mp;
+        return '<div class="fs-row' + (mp ? '' : ' nomatch') + '"><input type="checkbox" data-d="' + d + '" aria-label="' + m + '月' + d + '日を入れる"' + (on ? ' checked' : '') + '>'
+          + '<span class="d">' + m + '/' + d + '（' + WEEK[new Date(y, m - 1, d).getDay()] + '）<small>' + esc(sd[d] || 'シフト') + '</small></span>'
+          + '<select data-d="' + d + '" aria-label="' + m + '月' + d + '日の稼働場所">' + opts(mp) + '</select></div>';
+      }).join('')
+      + '<button type="button" class="fs-send" id="fs-send"></button><div class="fs-msg' + (fsLast ? ' ' + fsLast.cls : '') + '" id="fs-msg" role="status">' + (fsLast ? esc(fsLast.text) : '') + '</div>';
+    el.hidden = false;
+    fsLast = null;
+    syncFs();
+  }
+  function fsRows() {
+    var out = [];
+    Array.prototype.forEach.call(document.querySelectorAll('#from-shift .fs-row'), function (r) {
+      var c = r.querySelector('input'), sel = r.querySelector('select');
+      if (c.checked) out.push({ day: Number(c.getAttribute('data-d')), place: sel.value });
+    });
+    return out;
+  }
+  function syncFs() {
+    var b = $('fs-send'); if (!b) return;
+    var rows = fsRows(), lack = rows.filter(function (r) { return !r.place; }).length;
+    b.disabled = !rows.length || lack > 0 || saving;
+    b.textContent = !rows.length ? '入れる日にチェックしてください' : lack ? '場所を選んでください（' + lack + '日）' : 'まとめて送る（' + rows.length + '日）';
+  }
+  $('from-shift').addEventListener('change', function (ev) {
+    var t = ev.target, d = Number(t.getAttribute('data-d')); if (!d) return;
+    var row = t.closest('.fs-row'), c = row.querySelector('input'), sel = row.querySelector('select');
+    if (t.tagName === 'SELECT' && sel.value) c.checked = true;
+    fsPick[ym + ':' + d] = { on: c.checked, place: sel.value };
+    row.classList.toggle('nomatch', !sel.value);
+    syncFs();
+  });
+  $('from-shift').addEventListener('click', function (ev) { if (ev.target.closest('#fs-send')) sendFromShift(); });
+  // 同じ場所の日をまとめて1回ずつ送る（自宅 → 場所 → 自宅、高速なし）。途中で失敗したら、送れた分だけ外して残りを出す
+  function sendFromShift() {
+    var rows = fsRows().sort(function (a, b) { return a.day - b.day; });
+    if (saving || !rows.length || rows.some(function (r) { return !r.place; })) return;
+    var groups = {}, order = [];
+    rows.forEach(function (r) { if (!groups[r.place]) { groups[r.place] = []; order.push(r.place); } groups[r.place].push(r.day); });
+    var want = ym, b = $('fs-send'), msg = $('fs-msg'), done = 0;
+    saving = true; updateSaveButton();
+    b.disabled = true; msg.className = 'fs-msg'; msg.textContent = '送信中…';
+    order.reduce(function (prev, pid, i) {
+      return prev.then(function () {
+        msg.textContent = '送信中…（' + (i + 1) + '/' + order.length + '）';
+        var ds = groups[pid];
+        return call('saveDays', {
+          dates: ds.map(function (d) { return want + '-' + String(d).padStart(2, '0'); }),
+          stops: ['home', pid, 'home'], highway: false, toll: 0, parking: 0, note: ''
+        }, { retry: true, timeoutMs: 60000 }).then(function (d) { done += d.saved; ds.forEach(function (x) { delete fsPick[want + ':' + x]; }); });
+      });
+    }, Promise.resolve()).then(function () {
+      fsLast = { cls: 'ok', text: '✅ ' + done + '日分を入れました' };
+      if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+    }, function (err) {
+      fsLast = { cls: 'ng', text: (done ? done + '日分は入れました。' : '') + '残りは送れませんでした（' + err.message + '）。もう一度押すと残りだけ送ります' };
+    }).then(function () {
+      saving = false; updateSaveButton();
+      msg.className = 'fs-msg ' + fsLast.cls; msg.textContent = fsLast.text;
+      if (want === ym) loadMonth(); else fsLast = null;
+    });
+  }
+
   // ── カレンダー ──
   function renderCal() {
     var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5));
-    var first = new Date(y, m - 1, 1).getDay(), days = new Date(y, m, 0).getDate();
-    var f = filled(), t = new Date(), html = '';
+    var first = (new Date(y, m - 1, 1).getDay() + 6) % 7, days = new Date(y, m, 0).getDate();   // 月曜はじまり
+    var f = filled(), t = new Date(), html = '', miss = {};
+    missDays(false).forEach(function (d) { miss[d] = true; });
     for (var i = 0; i < first; i++) html += '<span></span>';
     for (var d = 1; d <= days; d++) {
-      var w = (first + d - 1) % 7, cls = 'cal-day' + (w === 0 ? ' sun' : w === 6 ? ' sat' : '') + (f[d] ? ' filled' : '') + (picked[d] ? ' on' : '')
+      var w = new Date(y, m - 1, d).getDay(), cls = 'cal-day' + (w === 0 ? ' sun' : w === 6 ? ' sat' : '') + (f[d] ? ' filled' : '') + (picked[d] ? ' on' : '') + (miss[d] ? ' miss' : '')
         + (t.getFullYear() === y && t.getMonth() + 1 === m && t.getDate() === d ? ' today' : '');
-      html += '<button type="button" class="' + cls + '" data-d="' + d + '" aria-pressed="' + (picked[d] ? 'true' : 'false') + '" aria-label="' + m + '月' + d + '日' + (f[d] ? '（入力済み）' : '') + '">' + d + '</button>';
+      html += '<button type="button" class="' + cls + '" data-d="' + d + '" aria-pressed="' + (picked[d] ? 'true' : 'false') + '" aria-label="' + m + '月' + d + '日' + (f[d] ? '（入力済み）' : miss[d] ? '（シフトの日・まだ）' : '') + '">' + d + '</button>';
     }
     $('cal').innerHTML = html;
+    $('legend-miss').hidden = !Object.keys(miss).length;
     var n = Object.keys(picked).length;
     $('days-info').textContent = n ? n + '日を選んでいます' + (Object.keys(picked).some(function (d) { return f[d]; }) ? '（入力済みの日は上書きします）' : '') : '';
     $('per-day').hidden = n < 2;
