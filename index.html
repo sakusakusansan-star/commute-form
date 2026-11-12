@@ -237,6 +237,10 @@
   .erow-edit .acts .cancel { background: var(--sg-surface); color: var(--sg-ink2); border: 1px solid var(--sg-hair); }
   .erow-edit .emsg { font-size: 12.5px; }
   .ro-note { font-size: 12px; color: var(--sg-mute); margin: 8px 2px 0; }
+  /* パソコン：右に一覧が出ているので「一覧を見る」は出さない */
+  @media (min-width: 1000px) {
+    body.sg-two .isum button { display: none; }
+  }
 </style>
 </head>
 <body class="has-tabbar has-actionbar">
@@ -247,11 +251,11 @@
   <div id="ss-buttons"></div>
 </div>
 
-<div id="main-app" class="sg-page" style="display:none;">
+<div id="main-app" class="sg-page" data-sg-two style="display:none;">
 
   <nav class="tabs sg-tabbar" aria-label="画面の切り替え" role="tablist">
     <button type="button" class="tab sg-tab active" id="tab-input" role="tab" aria-selected="true" onclick="switchTab('input')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>入力</button>
-    <button type="button" class="tab sg-tab" id="tab-confirm" role="tab" aria-selected="false" onclick="switchTab('confirm')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>確認・修正</button>
+    <button type="button" class="tab sg-tab" id="tab-confirm" data-sg-pairtab role="tab" aria-selected="false" onclick="switchTab('confirm')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>一覧</button>
     <button type="button" class="tab sg-tab" id="tab-settings" role="tab" aria-selected="false" onclick="switchTab('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="17" r="2.2"/></svg>設定</button>
   </nav>
 
@@ -268,12 +272,13 @@
 
   <!-- 送信ボタンは画面の下に固定（入力タブのときだけ。通常／イレギュラーで切り替え） -->
   <div class="sg-actionbar" id="actionbar">
+    <div class="sg-actionhint" id="action-hint"></div>
     <button class="sg-primary" id="btn-submit-normal" onclick="submitNormal()">送信する</button>
     <button class="sg-primary" id="btn-submit-irreg" onclick="submitIrregularEntry()" hidden>送信する</button>
   </div>
 
   <!-- 入力タブ -->
-  <div id="page-input" class="page active">
+  <div id="page-input" class="page active" data-sg-pair="main">
 
     <section class="mguide" id="month-guide" hidden aria-live="polite"></section>
     <div class="isum" id="input-summary" hidden></div>
@@ -368,7 +373,7 @@
   </div>
 
   <!-- 確認・修正タブ -->
-  <div id="page-confirm" class="page">
+  <div id="page-confirm" class="page" data-sg-pair="side">
     <div class="card">
       <div class="mbar"><button type="button" id="conf-prev" aria-label="前の月">‹</button><span id="conf-title">—</span><button type="button" id="conf-next" aria-label="次の月">›</button></div>
       <div id="entry-list"><div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div></div>
@@ -473,7 +478,12 @@
   var MAX_ATTEMPTS = 5;      // 初回 + 再試行4回（404は即座に返るので待ち時間は最大6秒ほど）
   var RETRY_WAIT_MS = 600;
 
+  // 「元に戻す」を待っている削除があれば、ほかの書き込みの前に先に済ませる（順番が入れ替わらないように）
   function callApi(action, params, timeoutMs, onRetry) {
+    if (/^(get|export)/.test(action) || !window.SiegNav) return callApiNow(action, params, timeoutMs, onRetry);
+    return SiegNav.flushUndo().then(function() { return callApiNow(action, params, timeoutMs, onRetry); });
+  }
+  function callApiNow(action, params, timeoutMs, onRetry) {
     // GASはコールドスタートで数秒かかることがあるため、既定を長めに取る。
     timeoutMs = timeoutMs || 30000;
     var body = JSON.stringify(Object.assign({ action: action }, params || {}));
@@ -577,7 +587,7 @@
   // 再試行しない操作では「もう一度押す前に結果を確認して」と伝える。
   function finalErrorMessage(err, action, attempts) {
     if (!err.transient || RETRY_SAFE_ACTIONS[action]) return err.message;
-    return '登録できたかどうか分かりません。「確認・修正」タブで確かめてから、もう一度送ってください。';
+    return '登録できたかどうか分かりません。「一覧」タブで確かめてから、もう一度送ってください。';
   }
   function finalErrorDetail(err, action, attempts) {
     var d = err.detail || '';
@@ -749,7 +759,7 @@
 
   function showStaffSelect(preList, msg) {
     document.getElementById('staff-select-screen').classList.remove('hidden');
-    document.getElementById('main-app').style.display = 'none';
+    document.getElementById('main-app').style.display = 'none'; document.body.classList.remove('sg-two');
     var msgEl = document.getElementById('ss-msg');
     if (msg) { msgEl.textContent = msg; msgEl.style.display = 'block'; }
     else { msgEl.style.display = 'none'; }
@@ -783,11 +793,22 @@
     startApp();
   }
 
+  // 右上の名前を押すと、名前を選ぶシートが出る（どのツールも同じ）。一覧が読めなければ、前と同じ名前選びの画面へ
   function switchStaff() {
-    localStorage.removeItem(STAFF_KEY);
-    var url = new URL(window.location.href);
-    url.searchParams.delete('staff');
-    window.location.href = url.toString();
+    callApi('getStaffList').then(function(list) {
+      return SiegNav.pickName(list, currentStaff).then(function(n) {
+        if (!n || n === currentStaff) return;
+        localStorage.setItem(STAFF_KEY, n);
+        var url = new URL(window.location.href);
+        url.searchParams.set('staff', n);
+        window.location.href = url.toString();
+      });
+    }).catch(function() {
+      localStorage.removeItem(STAFF_KEY);
+      var url = new URL(window.location.href);
+      url.searchParams.delete('staff');
+      window.location.href = url.toString();
+    });
   }
 
   // パートナー様は partner.html（自宅・場所を自分で登録する新しい画面）へ。
@@ -860,12 +881,15 @@
   }
 
   function switchTab(tab) {
+    // パソコンの幅では、入力の右に一覧を並べる（「一覧」タブは出さない）
+    if (SiegNav.wide() && tab === 'confirm') tab = 'input';
+    document.body.classList.toggle('sg-two', tab === 'input');
     ['input','confirm','settings'].forEach(function(t) {
       document.getElementById('tab-'+t).classList.toggle('active', t===tab);
       document.getElementById('tab-'+t).setAttribute('aria-selected', String(t===tab));
       document.getElementById('page-'+t).classList.toggle('active', t===tab);
     });
-    if (tab === 'confirm') loadEntries();
+    if (tab === 'confirm' || (tab === 'input' && SiegNav.wide())) loadEntries();
     syncActionbar();
   }
 
@@ -876,6 +900,16 @@
     document.body.classList.toggle('has-actionbar', onInput);
     document.getElementById('btn-submit-normal').hidden = currentType !== 'normal';
     document.getElementById('btn-submit-irreg').hidden = currentType !== 'irregular';
+    syncSubmit();
+  }
+  // 日付を選ぶまでは送信ボタンを出さず、案内の1行だけにする（sieg-nav.js が細い表示に替える）
+  var sendingNow = false;
+  function syncSubmit() {
+    var normal = currentType === 'normal';
+    var n = normal ? pickedDays().length : (dayIrreg ? 1 : 0);
+    var b = document.getElementById(normal ? 'btn-submit-normal' : 'btn-submit-irreg');
+    if (!sendingNow) { b.disabled = !n; b.textContent = normal && n > 1 ? n + '日分を送信する' : '送信する'; }
+    document.getElementById('action-hint').textContent = n ? '' : '日付を選ぶと送信できます';
   }
 
   function switchType(type) {
@@ -1023,6 +1057,7 @@
       grid.appendChild(div);
     }
     updateRangeInfo();
+    syncSubmit();
   }
 
   function updateRangeInfo() {
@@ -1153,6 +1188,7 @@
     var el = document.getElementById('rangeInfoIrreg');
     if (dayIrreg) { el.className = 'range-info set'; el.textContent = calMonthIrreg + '月' + dayIrreg + '日'; }
     else { el.className = 'range-info'; el.textContent = '日付をタップ'; }
+    syncSubmit();
   }
 
   function updateIrregEstimate() {
@@ -1182,8 +1218,8 @@
     };
     var sent = [], days = 0;
     var btn = document.getElementById('btn-submit-normal');
-    btn.disabled = true; btn.textContent = '送信中…';
-    function release() { btn.disabled = false; btn.textContent = '送信する'; }
+    sendingNow = true; btn.disabled = true; btn.textContent = '送信中…';
+    function release() { sendingNow = false; syncSubmit(); }
     resultEl.className = ''; resultEl.textContent = '送信中...';
 
     ranges.reduce(function(prev, r) {
@@ -1199,14 +1235,13 @@
         });
       });
     }, Promise.resolve()).then(function() {
-      release();
-      resultEl.className = 'success';
-      resultEl.textContent = '✅ ' + calMonth + '月' + rangesText(sent) + '（' + days + '日分）を登録しました';
-      if (navigator.vibrate) navigator.vibrate([30,50,30]);
       picked = {};
+      release();
+      resultEl.className = ''; resultEl.textContent = '';
       document.getElementById('toll-go').value = '';
       document.getElementById('toll-back').value = '';
       refreshMonth();
+      sentSheet(calMonth + '月' + rangesText(sent) + '（' + days + '日分）　' + base.place);
     }, function(err) {
       release();
       if (!sent.length) return showErr(resultEl, err.message);
@@ -1235,22 +1270,24 @@
     if (!content) { showErr(resultEl, '内容を入力してください'); return; }
 
     var btn = document.getElementById('btn-submit-irreg');
-    btn.disabled = true; btn.textContent = '送信中…';
-    function release() { btn.disabled = false; btn.textContent = '送信する'; }
+    sendingNow = true; btn.disabled = true; btn.textContent = '送信中…';
+    function release() { sendingNow = false; syncSubmit(); }
     resultEl.className = ''; resultEl.textContent = '送信中...';
 
     callApi('submitIrregular', {
       staffName: currentStaff,
       data: { day: dayIrreg, content: content, distanceKm: distance }
     }).then(function(res) {
-      release();
-      resultEl.className = 'success';
-      resultEl.textContent = '✅ 登録しました（¥' + Number(res.amount).toLocaleString() + '）';
+      var sentDay = dayIrreg;
+      resultEl.className = ''; resultEl.textContent = '';
       document.getElementById('irreg-content').value = '';
       document.getElementById('irreg-distance').value = '';
       document.getElementById('irreg-estimate').textContent = '¥0';
       dayIrreg = null;
+      release();
       renderCalIrreg();
+      loadMine();
+      sentSheet(calMonthIrreg + '月' + sentDay + '日　イレギュラー（¥' + Number(res.amount).toLocaleString() + '）');
 
       callApi('getMonthInfo', { staffName: currentStaff }).then(function(info) {
         monthInfo = info;
@@ -1262,6 +1299,12 @@
     });
   }
 
+  // 送ったあと：どのツールも同じ形で知らせる（次にやることを並べる）
+  function sentSheet(sub) {
+    SiegNav.done({ title: '送信しました', sub: sub, next: [
+      { label: '続けて入力する', value: 'more' }, { label: '一覧を見る', value: 'list' }, { label: 'ポータルへ戻る', href: SiegNav.portalUrl }
+    ] }).then(function(v) { if (v === 'list') switchTab('confirm'); });
+  }
   function showErr(el, msg) {
     el.className = 'error-msg';
     el.textContent = '⚠️ ' + msg;
@@ -1311,7 +1354,7 @@
     var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5));
     confEntries = entries;
     if (!entries.length) {
-      listEl.innerHTML = '<div class="empty-msg">' + (editable ? 'まだ入力がありません' : 'この月の記録はありません（履歴は、月を切り替えたときかPDFを保存したときに残ります）') + '</div>';
+      listEl.innerHTML =  (editable ? SiegNav.empty('まだ入力がありません', '「入力」で日付と場所を選んで送ると、ここに並びます') : SiegNav.empty('この月の記録はありません', '履歴は、月を切り替えたときかPDFを保存したときに残ります'));
       return;
     }
     // 合計（シートの合計行と同じく、全部足してから円に丸める）
@@ -1355,7 +1398,7 @@
       return;
     }
     var act = ev.target.closest('[data-act]');
-    if (act && act.getAttribute('data-act') === 'del') { if (e.type === 'normal') deleteNormal(e.day); else deleteIrregular(e.row); return; }
+    if (act && act.getAttribute('data-act') === 'del') { if (e.type === 'normal') deleteNormal(e.day, row); else deleteIrregular(e.row, row); return; }
     if (act && act.getAttribute('data-act') === 'edit') { openEdit(row, e); return; }
     var hwb = ev.target.closest('[data-hw]');
     if (hwb) {
@@ -1412,8 +1455,12 @@
     R.everyone.forEach(function(n) { if (normName(n) === normName(full) || (R.fullName(n) && normName(R.fullName(n)) === normName(full))) hit = n; });
     return hit || full;
   }
-  function afterLoad() { renderGuide(); loadMine(); loadShift(); }
+  function afterLoad() {
+    renderGuide(); loadMine(); loadShift();
+    document.body.classList.toggle('sg-two', document.getElementById('page-input').classList.contains('active'));
+  }
   function loadMine() {
+    if (SiegNav.wide() && document.getElementById('page-input').classList.contains('active')) loadEntries();   // パソコンは右の一覧も新しくする
     callApi('getMyEntries', { staffName: currentStaff }).then(function(list) { mine = list || []; renderSummary(); renderFromShift(); })
       .catch(function() { mine = null; renderSummary(); renderFromShift(); });
   }
@@ -1560,33 +1607,43 @@
         .catch(function(err) { b.disabled = false; m2.textContent = '❌ 保存できませんでした：' + err.message; });
     };
     document.getElementById('mg-start').onclick = function() {
-      if (!confirm((saved ? '' : om + '月分のPDFをまだ保存していません。\n') + nm + '月を始めますか？（' + om + '月分は履歴に残ります）')) return;
-      var b = this, m2 = document.getElementById('mg-msg');
-      b.disabled = true; m2.textContent = nm + '月に切り替えています…';
-      callApi('resetMonth', { staffName: currentStaff, month: nm }, 30000).then(function() {
-        mine = null; shiftDays = null; fsPick = {}; picked = {}; confYm = '';
-        startApp();
-      }).catch(function(err) { b.disabled = false; m2.textContent = '❌ 切り替えられませんでした：' + err.message; });
+      var b = this;
+      SiegNav.confirm((saved ? '' : om + '月分のPDFをまだ保存していません。\n') + om + '月分は履歴に残ります（あとからも見られます）。', { title: nm + '月を始めますか？', ok: nm + '月を始める' }).then(function(yes) {
+        if (!yes) return;
+        var m2 = document.getElementById('mg-msg');
+        b.disabled = true; m2.textContent = nm + '月に切り替えています…';
+        callApi('resetMonth', { staffName: currentStaff, month: nm }, 30000).then(function() {
+          mine = null; shiftDays = null; fsPick = {}; picked = {}; confYm = '';
+          startApp();
+        }).catch(function(err) { b.disabled = false; m2.textContent = '❌ 切り替えられませんでした：' + err.message; });
+      });
     };
   }
 
-  function deleteNormal(day) {
-    if (!confirm((monthInfo ? monthInfo.month : calMonth) + '月' + day + '日の入力を削除しますか？')) return;
-    callApi('deleteNormalEntry', { staffName: currentStaff, day: day }).then(function() {
-      loadEntries();
-      callApi('getMonthInfo', { staffName: currentStaff }).then(function(info) { monthInfo = info; renderCal(); renderFromShift(); });
-    }).catch(function(err) { alert('削除できませんでした。' + err.message); });
+  // 削除：行をすぐ隠して「元に戻す」を出す。押されなければ5秒後に消す（SiegNav.undoable）
+  function deleteNormal(day, rowEl) {
+    SiegNav.undoable({
+      text: (monthInfo ? monthInfo.month : calMonth) + '月' + day + '日を消しました', rows: rowEl,
+      commit: function() { return callApi('deleteNormalEntry', { staffName: currentStaff, day: day }); },
+      onDone: function() {
+        loadEntries(); loadMine();
+        callApi('getMonthInfo', { staffName: currentStaff }).then(function(info) { monthInfo = info; renderCal(); renderFromShift(); });
+      }
+    });
   }
 
-  function deleteIrregular(row) {
-    if (!confirm('このイレギュラー入力を削除しますか？')) return;
-    callApi('deleteIrregularEntry', { staffName: currentStaff, row: row }).then(function() {
-      loadEntries();
-      callApi('getMonthInfo', { staffName: currentStaff }).then(function(info) {
-        monthInfo = info;
-        document.getElementById('irreg-capacity').textContent = '枠: ' + info.irregularCount + '/' + info.irregularCapacity;
-      });
-    }).catch(function(err) { alert('削除できませんでした。' + err.message); });
+  function deleteIrregular(row, rowEl) {
+    SiegNav.undoable({
+      text: 'イレギュラーの入力を消しました', rows: rowEl,
+      commit: function() { return callApi('deleteIrregularEntry', { staffName: currentStaff, row: row }); },
+      onDone: function() {
+        loadEntries(); loadMine();
+        callApi('getMonthInfo', { staffName: currentStaff }).then(function(info) {
+          monthInfo = info;
+          document.getElementById('irreg-capacity').textContent = '枠: ' + info.irregularCount + '/' + info.irregularCapacity;
+        });
+      }
+    });
   }
 
   // ===== 設定 =====
@@ -1601,11 +1658,13 @@
   function changeSettingsMonth() {
     var month = document.getElementById('sel-month').value;
     if (!month) return;
-    if (!confirm(guessYear(month) + '年' + month + '月に切り替えます。カレンダーがその月になり、今の月の分は履歴に残ります（シートからは消えます）。\n' +
-        '（今の月をまだPDF保存していなければ、先に「PDF保存」をしてください）\nよろしいですか？')) {
-      document.getElementById('sel-month').value = '';
-      return;
-    }
+    SiegNav.confirm('カレンダーがその月になり、今の月の分は履歴に残ります（シートからは消えます）。\n今の月をまだPDF保存していなければ、先に「PDF保存」をしてください。',
+      { title: guessYear(month) + '年' + month + '月に切り替えますか？', ok: '切り替える' }).then(function(yes) {
+      if (!yes) { document.getElementById('sel-month').value = ''; return; }
+      doChangeMonth(month);
+    });
+  }
+  function doChangeMonth(month) {
     var el = document.getElementById('reset-result');
     el.style.color = 'var(--sg-mute)'; el.textContent = '切り替え中...';
     callApi('resetMonth', { staffName: currentStaff, month: month }, 30000).then(function(res) {
@@ -1802,14 +1861,14 @@
     var row = item.getAttribute('data-row');
     var name = item.querySelector('.place-name-input').value.trim();
     var address = item.querySelector('.place-address-input').value.trim();
-    if (!name || !address) { alert('名称と住所を入力してください'); return; }
+    if (!name || !address) { SiegNav.alert('名称と住所を入力してください'); return; }
 
     btn.disabled = true; btn.textContent = '保存中...';
     callApi('updatePlace', { row: row, name: name, address: address }).then(function() {
       loadPlaceManage();
       refreshPlaceListForForm();
     }).catch(function(err) {
-      alert('保存できませんでした。' + err.message);
+      SiegNav.alert(err.message, { title: '保存できませんでした' });
       btn.disabled = false; btn.textContent = '保存';
     });
   }
@@ -1818,15 +1877,16 @@
     var item = btn.closest('.place-item');
     var row = item.getAttribute('data-row');
     var name = item.querySelector('.place-name-input').value.trim();
-    if (!confirm('「' + name + '」を削除しますか？\n（すでに使われている実績データはそのまま残ります）')) return;
-
-    btn.disabled = true; btn.textContent = '削除中...';
-    callApi('deletePlace', { row: row }).then(function() {
-      loadPlaceManage();
-      refreshPlaceListForForm();
-    }).catch(function(err) {
-      alert('削除できませんでした。' + err.message);
-      btn.disabled = false; btn.textContent = '削除';
+    SiegNav.confirm('すでに使われている実績データはそのまま残ります。', { title: '「' + name + '」を削除しますか？', ok: '削除する', danger: true }).then(function(yes) {
+      if (!yes) return;
+      btn.disabled = true; btn.textContent = '削除中...';
+      callApi('deletePlace', { row: row }).then(function() {
+        loadPlaceManage();
+        refreshPlaceListForForm();
+      }).catch(function(err) {
+        SiegNav.alert(err.message, { title: '削除できませんでした' });
+        btn.disabled = false; btn.textContent = '削除';
+      });
     });
   }
 

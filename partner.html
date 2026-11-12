@@ -195,6 +195,11 @@
   #state { text-align: center; color: var(--sg-mute); font-size: 14px; padding: 40px 0; line-height: 1.7; }
   #state:has(.sg-skel-wrap), #state:has(.sg-err) { padding: 12px 0; }
   @media (prefers-reduced-motion: no-preference) { .btn, .seg button, .cal-day { transition: transform .06s; } .btn:active { transform: scale(.985); } }
+  /* パソコン：右に一覧が出ているので「一覧を見る」は出さない */
+  @media (min-width: 1000px) {
+    body.sg-two .isum button { display: none; }
+    body.sg-two #page-list .month-bar { display: none; }
+  }
 </style>
 </head>
 <body class="has-tabbar has-actionbar">
@@ -211,11 +216,11 @@
 
   <div id="state"><div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div></div>
 
-  <div id="app" hidden>
+  <div id="app" data-sg-two hidden>
     <div id="top-notice"></div>
 
     <!-- 入力 -->
-    <section id="page-input" class="page active" aria-labelledby="tab-input">
+    <section id="page-input" class="page active" data-sg-pair="main" aria-labelledby="tab-input">
       <div id="setup-card"></div>
 
       <div class="month-bar"><button type="button" class="m-prev" aria-label="前の月">‹</button><div class="t m-title"></div><button type="button" class="m-next" aria-label="次の月">›</button></div>
@@ -264,7 +269,7 @@
     </section>
 
     <!-- 一覧・PDF -->
-    <section id="page-list" class="page" aria-labelledby="tab-list">
+    <section id="page-list" class="page" data-sg-pair="side" aria-labelledby="tab-list">
       <div class="month-bar"><button type="button" class="m-prev" aria-label="前の月">‹</button><div class="t m-title"></div><button type="button" class="m-next" aria-label="次の月">›</button></div>
       <div class="total"><div><div class="k">この月の合計</div><div class="s" id="tot-sub">—</div></div><div class="v" id="tot-v">¥0</div></div>
       <div class="card"><div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg> 入力した日</div><div class="msg" id="list-msg" style="margin:0 0 8px"></div><div id="entries"><div class="empty">読み込み中…</div></div></div>
@@ -311,7 +316,7 @@
 
   <nav class="sg-tabbar" role="tablist" aria-label="画面の切り替え" id="tabbar" hidden>
     <button type="button" class="sg-tab" role="tab" id="tab-input" aria-selected="true" data-tab="input"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg>入力</button>
-    <button type="button" class="sg-tab" role="tab" id="tab-list" aria-selected="false" data-tab="list"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>一覧・提出</button>
+    <button type="button" class="sg-tab" role="tab" id="tab-list" data-sg-pairtab aria-selected="false" data-tab="list"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="M4.5 6h.01M4.5 12h.01M4.5 18h.01"/></svg>一覧・提出</button>
     <button type="button" class="sg-tab" role="tab" id="tab-places" aria-selected="false" data-tab="places"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg>自宅と場所</button>
   </nav>
 </div>
@@ -355,7 +360,12 @@
   function dayText(date) { var d = new Date(Number(date.slice(0, 4)), Number(date.slice(5, 7)) - 1, Number(date.slice(8))); return (d.getMonth() + 1) + '/' + d.getDate() + '（' + WEEK[d.getDay()] + '）'; }
   function setMsg(el, text, kind) { el = typeof el === 'string' ? $(el) : el; el.classList.remove('ok', 'ng', 'info'); if (kind) el.classList.add(kind); el.textContent = text || ''; }
 
+  // 「元に戻す」を待っている削除があれば、ほかの書き込みの前に先に済ませる（順番が入れ替わらないように）
   function call(action, body, opts) {
+    if (/^(init|list|preview|find|search)/.test(action)) return callNow(action, body, opts);
+    return SiegNav.flushUndo().then(function () { return callNow(action, body, opts); });
+  }
+  function callNow(action, body, opts) {
     var o = opts || {};
     return GasClient.post(API, Object.assign({ action: action, name: name }, body || {}), { retry: !!o.retry, timeoutMs: o.timeoutMs || 45000 })
       .then(function (json) {
@@ -767,15 +777,25 @@
     var tooMany = rcQueue.length > 0 && n > 1;
     var ok = !!preview && n > 0 && routeReady() && amountsOk() && !saving && !tooMany;
     b.disabled = !ok;
-    b.textContent = saving ? '送信中…' : tooMany ? '領収書があるときは1日ずつ送ってください' : n ? n + '日分を送信する' + (rcQueue.length ? '（領収書' + rcQueue.length + '枚）' : '') : '日付を選んでください';
+    // 押せないあいだは、ボタンの文字を「あと何をすればいいか」にする（sieg-nav.js が細い案内の1行に替える）
+    b.textContent = saving ? '送信中…' : tooMany ? '領収書があるときは1日ずつ送ってください'
+      : !n ? '日付を選ぶと送信できます' : !routeReady() ? '行き先を選んでください' : !amountsOk() ? '金額を確かめてください' : !preview ? '距離を計算中…'
+      : n + '日分を送信する' + (rcQueue.length ? '（領収書' + rcQueue.length + '枚）' : '');
   }
 
   $('btn-save').onclick = function () {
     if ($('btn-save').disabled) return;
     var f = filled(), days = Object.keys(picked).map(Number).sort(function (a, b) { return a - b; });
     var over = days.filter(function (d) { return f[d]; });
-    if (over.length && !confirm(over.map(function (d) { return Number(ym.slice(5)) + '/' + d; }).join('・') + ' はもう入力してあります。上書きしますか？')) return;
-    if (highway && !amount('toll') && !confirm('高速代が0円です。このまま送りますか？')) return;
+    var ask = Promise.resolve(true);
+    if (over.length) ask = ask.then(function () {
+      return SiegNav.confirm('送ると、いまの内容に置き換わります。', { title: over.map(function (d) { return Number(ym.slice(5)) + '/' + d; }).join('・') + ' はもう入力してあります', ok: '上書きする' });
+    });
+    if (highway && !amount('toll')) ask = ask.then(function (yes) { return yes && SiegNav.confirm('高速代が0円です。このまま送りますか？', { ok: 'このまま送る' }); });
+    ask.then(function (yes) { if (yes) sendDays(days); });
+  };
+  function sendDays(days) {
+    if (saving) return;
     saving = true; updateSaveButton(); setMsg('save-msg', '');
     call('saveDays', {
       dates: days.map(function (d) { return ym + '-' + String(d).padStart(2, '0'); }),
@@ -789,7 +809,11 @@
         at: function () { return { date: date }; },
         progress: function (i, n) { setMsg('save-msg', msg + '。領収書を保存中…（' + i + '/' + n + '）', 'info'); }
       }).then(function () {
-        if (items.length) setMsg('save-msg', msg + '。領収書' + items.length + '枚も保存しました', 'ok');
+        setMsg('save-msg', '');
+        // 送ったあと：どのツールも同じ形で知らせる（次にやることを並べる）
+        SiegNav.done({ title: '送信しました', sub: d.saved + '日分　' + d.route.text + (items.length ? '\n領収書' + items.length + '枚も保存しました' : ''), next: [
+          { label: '続けて入力する', value: 'more' }, { label: '一覧を見る', value: 'list' }, { label: 'ポータルへ戻る', href: SiegNav.portalUrl }
+        ] }).then(function (v) { if (v === 'list') switchTab('list'); });
       }, function (e) {
         setMsg('save-msg', '入力は送信しました。' + e.message + '　「一覧・提出」のその日から足し直せます。', 'ng');
       }).then(function () {
@@ -799,7 +823,7 @@
     }).catch(function (e) {
       setMsg('save-msg', '❌ ' + e.message, 'ng');
     }).then(function () { saving = false; renderCal(); drawCalc(); updateSaveButton(); });
-  };
+  }
 
   // ── 一覧 ──
   function renderList() {
@@ -812,7 +836,7 @@
     $('etc-list').innerHTML = files.filter(function (f) { return f.kind === 'ETC'; }).map(fileLi).join('');
     var orphans = files.filter(function (f) { return f.date && !dates[f.date]; });
     var orphanHtml = orphans.length ? '<div class="orphans"><div class="t">入力を消した日の領収書</div><ul class="rc-mini">' + orphans.map(function (f) { return miniLi(f, true); }).join('') + '</ul></div>' : '';
-    if (!month.entries.length) { $('entries').innerHTML = '<div class="empty">まだ入力がありません。</div>' + orphanHtml; return; }
+    if (!month.entries.length) { $('entries').innerHTML = SiegNav.empty('まだ入力がありません', '「入力」で日付と行き先を選んで送ると、ここに並びます') + orphanHtml; return; }
     $('entries').innerHTML = month.entries.map(function (e) {
       var rc = byDate[e.date] || [];
       var extra = [km(e.km) + (e.highway ? '（高速）' : ''), 'ガソリン代 ' + yen(e.gas)];
@@ -837,9 +861,12 @@
   }
   function deleteFile(id, btn) {
     var f = (month.files || []).filter(function (x) { return x.id === id; })[0];
-    if (!f || !confirm('「' + f.file + '」を消しますか？（Googleドライブからもゴミ箱へ移します）')) return;
-    btn.disabled = true;
-    call('deleteAttachment', { id: id }).then(loadMonth).catch(function (err) { alert(err.message); btn.disabled = false; });
+    if (!f) return;
+    SiegNav.confirm('Googleドライブからもゴミ箱へ移します。', { title: '「' + f.file + '」を消しますか？', ok: '消す', danger: true }).then(function (yes) {
+      if (!yes) return;
+      btn.disabled = true;
+      call('deleteAttachment', { id: id }).then(loadMonth).catch(function (err) { SiegNav.alert(err.message, { title: '消せませんでした' }); btn.disabled = false; });
+    });
   }
   $('etc-list').addEventListener('click', function (e) { var b = e.target.closest('[data-fdel]'); if (b) deleteFile(b.getAttribute('data-fdel'), b); });
 
@@ -870,9 +897,13 @@
     var e = id && month.entries.filter(function (x) { return x.id === id; })[0];
     if (!e) return;
     if (dl) {
-      if (!confirm(dayText(e.date) + ' の入力を削除しますか？' + ((month.files || []).some(function (f) { return f.date === e.date; }) ? '（この日の領収書は残ります。いらなければ×で消してください）' : ''))) return;
-      dl.disabled = true;
-      call('deleteEntry', { id: id }).then(loadMonth).catch(function (err) { alert(err.message); dl.disabled = false; });
+      // 行をすぐ隠して「元に戻す」を出す。押されなければ5秒後に消す
+      var keep = (month.files || []).some(function (f) { return f.date === e.date; });
+      SiegNav.undoable({
+        text: dayText(e.date) + ' を消しました' + (keep ? '（領収書は残ります）' : ''), rows: dl.closest('.entry'),
+        commit: function () { return call('deleteEntry', { id: id }); },
+        onDone: loadMonth
+      });
       return;
     }
     // 直す：入力画面にその日の内容を入れる（場所は今の一覧から名前で探す）
@@ -1028,9 +1059,12 @@
         .catch(function (err) { setMsg('home-msg', err.message, 'ng'); mn.disabled = false; });
     } else if (dl) {
       var x = homeById(dl.getAttribute('data-hdel'));
-      if (!x || !confirm('「' + x.label + '」を削除しますか？（これまでの記録はそのまま残ります）')) return;
-      dl.disabled = true;
-      call('deleteHome', { id: x.id }).then(afterHomes).catch(function (err) { setMsg('home-msg', err.message, 'ng'); dl.disabled = false; });
+      if (!x) return;
+      SiegNav.confirm('これまでの記録はそのまま残ります。', { title: '「' + x.label + '」を削除しますか？', ok: '削除する', danger: true }).then(function (yes) {
+        if (!yes) return;
+        dl.disabled = true;
+        call('deleteHome', { id: x.id }).then(afterHomes).catch(function (err) { setMsg('home-msg', err.message, 'ng'); dl.disabled = false; });
+      });
     }
   });
 
@@ -1040,7 +1074,7 @@
     list.innerHTML = me.places.length ? me.places.map(function (p) {
       return '<div class="place" data-id="' + esc(p.id) + '"><div class="n">' + esc(p.name) + '</div><div class="ad">' + esc(p.address) + '</div>'
         + '<div class="acts"><button type="button" class="btn sub" data-pedit="' + esc(p.id) + '">直す</button><button type="button" class="btn danger" data-pdel="' + esc(p.id) + '">削除</button></div><div class="pedit"></div></div>';
-    }).join('') : '<div class="empty" style="padding:12px 0">まだ登録がありません。</div>';
+    }).join('') : SiegNav.empty('まだ登録がありません', '下の「＋ 場所を登録」から、よく行く店や現場を入れてください');
   }
   function placeForm(box, p, onDone, onCancel) {
     var chosen = p ? p.address : '';
@@ -1078,13 +1112,16 @@
       placeForm(box, p, function () {}, function () { box.innerHTML = ''; });
     } else if (dl) {
       var q = me.places.filter(function (x) { return x.id === dl.getAttribute('data-pdel'); })[0];
-      if (!q || !confirm('「' + q.name + '」を削除しますか？（これまでの記録はそのまま残ります）')) return;
-      dl.disabled = true;
-      call('deletePlace', { id: q.id }).then(function (places) {
-        me.places = places;
-        stops = stops.map(function (s) { return s === q.id ? '' : s; });
-        renderPlaces(); renderRoute(); renderSetup(); updateCalc();
-      }).catch(function (err) { alert(err.message); dl.disabled = false; });
+      if (!q) return;
+      SiegNav.confirm('これまでの記録はそのまま残ります。', { title: '「' + q.name + '」を削除しますか？', ok: '削除する', danger: true }).then(function (yes) {
+        if (!yes) return;
+        dl.disabled = true;
+        call('deletePlace', { id: q.id }).then(function (places) {
+          me.places = places;
+          stops = stops.map(function (s) { return s === q.id ? '' : s; });
+          renderPlaces(); renderRoute(); renderSetup(); updateCalc();
+        }).catch(function (err) { SiegNav.alert(err.message, { title: '削除できませんでした' }); dl.disabled = false; });
+      });
     }
   });
 
@@ -1111,6 +1148,9 @@
 
   // ── タブ ──
   function switchTab(t) {
+    // パソコンの幅では、入力の右に一覧を並べる（「一覧・提出」タブは出さない）
+    if (SiegNav.wide() && t === 'list') t = 'input';
+    document.body.classList.toggle('sg-two', t === 'input');
     ['input', 'list', 'places'].forEach(function (k) {
       $('page-' + k).classList.toggle('active', k === t);
       $('tab-' + k).setAttribute('aria-selected', k === t ? 'true' : 'false');
