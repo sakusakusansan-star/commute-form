@@ -82,6 +82,8 @@
   .fs-row .d small { display: block; font-size: 11px; color: var(--sg-mute); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 6em; }
   .fs-row select { min-height: 42px; padding: 8px 10px; font-size: 14px; }
   .fs-row.nomatch select { border-color: var(--sg-amber); }
+  .fs-row .d small i { font-style: normal; color: var(--sg-amber); font-weight: 800; }
+  .fshift p b { color: var(--sg-amber); }
   .fs-send { width: 100%; margin-top: 10px; min-height: 48px; border: 0; border-radius: var(--sg-r-sm); background: var(--sg-primary); color: var(--sg-on-primary); font-size: 15px; font-weight: 800; }
   .fs-send:disabled { opacity: .45; }
   .fs-msg { font-size: 13px; margin-top: 8px; font-weight: 700; }
@@ -491,22 +493,25 @@
     if (!R || !R.shiftPartnerApi) return;
     GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: name }, { retry: true }).then(function (r) {
       if (!r || !r.ok) return;
-      var out = {};
+      var out = {}, hot = {};   // hot：ホテル泊の日（自宅からの往復にならない）
       (r.data || []).forEach(function (x) {
         var k = x.year + '-' + String(x.month).padStart(2, '0'), o = out[k] = out[k] || {};
-        for (var d = Number(x.startDay); d <= Number(x.endDay); d++) o[d] = x.place || x.torihiki || '';
+        for (var d = Number(x.startDay); d <= Number(x.endDay); d++) { o[d] = x.place || x.torihiki || ''; if (x.hotel) (hot[k] = hot[k] || {})[d] = String(x.hotel); }
       });
-      shifts = out; renderCal(); renderFromShift();
+      shifts = out; shiftHotel = hot; renderCal(); renderFromShift();
     }).catch(function () {});
   }
-  // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）。一覧を読み込むまでは出さない
-  function missDays(withToday) {
+  // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）。一覧を読み込むまでは出さない。
+  // ホテル泊の日は自宅からの往復にならないので別あつかい（hotel を付けたときだけ返す。入れ忘れの印も付けない）
+  var shiftHotel = {};
+  function missDays(withToday, hotel) {
     var sd = shifts && shifts[ym];
     if (!sd || !month) return [];
     var t = new Date(), now = ymOf(t);
     if (ym > now) return [];
     var limit = ym < now ? 99 : t.getDate() - (withToday ? 0 : 1), f = filled();
-    return Object.keys(sd).map(Number).filter(function (d) { return d <= limit && !f[d]; }).sort(function (a, b) { return a - b; });
+    var hd = shiftHotel[ym] || {};
+    return Object.keys(sd).map(Number).filter(function (d) { return d <= limit && !f[d] && !!hd[d] === !!hotel; }).sort(function (a, b) { return a - b; });
   }
   // シフトの現場の書き方 → 登録した稼働場所（そろっていれば。あいまいなら空＝選んでもらう）
   function normPlace(v) { return String(v || '').replace(/[\s　・･\-]/g, '').replace(/店$/, '').toLowerCase(); }
@@ -520,18 +525,22 @@
   }
   function renderFromShift() {
     var el = $('from-shift'), days = missDays(true);
+    // ホテル泊の日は、ふつうの日の候補があるときだけ一緒に出す（チェックは外しておく）
+    var hdays = days.length ? missDays(true, true) : [], todo = days.length, hd = shiftHotel[ym] || {};
+    days = days.concat(hdays).sort(function (a, b) { return a - b; });
     if (!days.length || !me || !me.homeSet || !me.places.length) {
       if (fsLast) { el.innerHTML = '<div class="fs-msg ' + fsLast.cls + '">' + esc(fsLast.text) + '</div>'; el.hidden = false; fsLast = null; return; }
       el.hidden = true; el.innerHTML = ''; return;
     }
     var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5)), sd = shifts[ym];
     var opts = function (sel) { return '<option value="">場所を選ぶ…</option>' + me.places.map(function (p) { return '<option value="' + esc(p.id) + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join(''); };
-    el.innerHTML = '<h2>シフトからまとめて入れる<small>まだ ' + days.length + '日</small></h2>'
-      + '<p>シフトの日で、まだ入れていない日です。自宅 → 場所 → 自宅 で入ります。高速・駐車場・経由地がある日は、チェックを外して下のカレンダーから入れてください。</p>'
+    el.innerHTML = '<h2>シフトからまとめて入れる<small>まだ ' + todo + '日</small></h2>'
+      + '<p>シフトの日で、まだ入れていない日です。自宅 → 場所 → 自宅 で入ります。高速・駐車場・経由地がある日は、チェックを外して下のカレンダーから入れてください。'
+      + (hdays.length ? '<br><b>ホテル泊</b>の日は自宅からの往復にならないので、チェックを外してあります。' : '') + '</p>'
       + days.map(function (d) {
-        var k = ym + ':' + d, p = fsPick[k], mp = p ? p.place : matchPlace(sd[d]), on = p ? p.on : !!mp;
-        return '<div class="fs-row' + (mp ? '' : ' nomatch') + '"><input type="checkbox" data-d="' + d + '" aria-label="' + m + '月' + d + '日を入れる"' + (on ? ' checked' : '') + '>'
-          + '<span class="d">' + m + '/' + d + '（' + WEEK[new Date(y, m - 1, d).getDay()] + '）<small>' + esc(sd[d] || 'シフト') + '</small></span>'
+        var k = ym + ':' + d, ht = !!hd[d], p = fsPick[k], mp = p ? p.place : matchPlace(sd[d]), on = p ? p.on : (!!mp && !ht);
+        return '<div class="fs-row' + (mp ? '' : ' nomatch') + (ht ? ' hotel' : '') + '"><input type="checkbox" data-d="' + d + '" aria-label="' + m + '月' + d + '日を入れる' + (ht ? '（ホテル泊）' : '') + '"' + (on ? ' checked' : '') + '>'
+          + '<span class="d">' + m + '/' + d + '（' + WEEK[new Date(y, m - 1, d).getDay()] + '）<small>' + (ht ? '<i>ホテル泊</i>' : esc(sd[d] || 'シフト')) + '</small></span>'
           + '<select data-d="' + d + '" aria-label="' + m + '月' + d + '日の稼働場所">' + opts(mp) + '</select></div>';
       }).join('')
       + '<button type="button" class="fs-send" id="fs-send"></button><div class="fs-msg' + (fsLast ? ' ' + fsLast.cls : '') + '" id="fs-msg" role="status">' + (fsLast ? esc(fsLast.text) : '') + '</div>';
