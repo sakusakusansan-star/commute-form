@@ -454,7 +454,7 @@
     var next = addMonth(ym, n);
     if (next < minYm || next > maxYm) return;
     ym = next; picked = {}; month = null;
-    renderMonthBars(); renderCal(); renderSummary(); renderFromShift(); updateCalc(); loadMonth();
+    renderMonthBars(); renderCal(); renderSummary(); renderFromShift(); updateCalc(); loadMonth(); loadShift();
   }
   Array.prototype.forEach.call(document.querySelectorAll('.m-prev'), function (b) { b.onclick = function () { changeMonth(-1); }; });
   Array.prototype.forEach.call(document.querySelectorAll('.m-next'), function (b) { b.onclick = function () { changeMonth(1); }; });
@@ -489,17 +489,24 @@
   // ── シフト（パートナー用シフト表の、日ごとの現場） ──
   var shifts = null;             // { '2026-11': { 4: 'イオン' } }
   var fsPick = {}, fsLast = null;
+  // 開いている月のシフトを読む（月ごとに1回）。シフト表を次の月に切り替えたあとの月は、GAS が「（保存）」のタブから返す。
+  // 古い GAS は年月を見ずに「いまのシフト表の月」を返すので、返ってきた年月でしまう（その場合、ほかの月は候補が出ないだけ）
+  var shiftAsked = {};
   function loadShift() {
-    if (!R || !R.shiftPartnerApi) return;
-    GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: name }, { retry: true }).then(function (r) {
-      if (!r || !r.ok) return;
+    if (!R || !R.shiftPartnerApi || !ym || shiftAsked[ym]) return;
+    var want = ym;
+    shiftAsked[want] = true;
+    GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: name, year: Number(want.slice(0, 4)), month: Number(want.slice(5)) }, { retry: true }).then(function (r) {
+      if (!r || !r.ok) { delete shiftAsked[want]; return; }
       var out = {}, hot = {};   // hot：ホテル泊の日（自宅からの往復にならない）
       (r.data || []).forEach(function (x) {
         var k = x.year + '-' + String(x.month).padStart(2, '0'), o = out[k] = out[k] || {};
         for (var d = Number(x.startDay); d <= Number(x.endDay); d++) { o[d] = x.place || x.torihiki || ''; if (x.hotel) (hot[k] = hot[k] || {})[d] = String(x.hotel); }
       });
-      shifts = out; shiftHotel = hot; renderCal(); renderFromShift();
-    }).catch(function () {});
+      shifts = shifts || {};
+      Object.keys(out).forEach(function (k) { shifts[k] = out[k]; shiftHotel[k] = hot[k] || {}; });
+      renderCal(); renderFromShift();
+    }).catch(function () { delete shiftAsked[want]; });
   }
   // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）。一覧を読み込むまでは出さない。
   // ホテル泊の日は自宅からの往復にならないので別あつかい（hotel を付けたときだけ返す。入れ忘れの印も付けない）
