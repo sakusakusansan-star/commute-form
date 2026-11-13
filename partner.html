@@ -8,6 +8,9 @@
 <meta name="theme-color" content="#EFF1F4" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C1015" media="(prefers-color-scheme: dark)">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<!-- Google（GAS）への接続を先に始めておく（最初の読み込みが少し早くなる） -->
+<link rel="preconnect" href="https://script.google.com" crossorigin>
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 <link rel="stylesheet" href="sieg-theme.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -363,10 +366,14 @@
   function setMsg(el, text, kind) { el = typeof el === 'string' ? $(el) : el; el.classList.remove('ok', 'ng', 'info'); if (kind) el.classList.add(kind); el.textContent = text || ''; }
 
   // 「元に戻す」を待っている削除があれば、ほかの書き込みの前に先に済ませる（順番が入れ替わらないように）
+  // 前回の内容を先に出しているあいだ（initFresh が false）は、書き込みを受け付けない（最新の自宅・場所を読み終えてから）
+  var initFresh = false;
   function call(action, body, opts) {
     if (/^(init|list|preview|find|search)/.test(action)) return callNow(action, body, opts);
+    if (!initFresh) return Promise.reject(new Error('最新の内容を確認しています。数秒待ってから、もう一度お試しください。'));
     return SiegNav.flushUndo().then(function () { return callNow(action, body, opts); });
   }
+  function ckey(kind) { return 'pcommute:' + kind + ':' + name; }
   function callNow(action, body, opts) {
     var o = opts || {};
     return GasClient.post(API, Object.assign({ action: action, name: name }, body || {}), { retry: !!o.retry, timeoutMs: o.timeoutMs || 45000 })
@@ -396,22 +403,49 @@
     name = n.short;
     $('who').hidden = false; $('who-i').textContent = name.charAt(0); $('who-n').textContent = name;
     if (!API) { $('state').textContent = 'この画面はただいま準備中です（Google側の設定が終わると使えます）。'; return; }
-    call('init', {}, { retry: true }).then(function (d) {
+    // 前回の内容があれば、すぐ出す（裏で最新を読んで置き換える。送信は最新を読み終えてから）
+    var now = ymOf(new Date()), booted = false, cachedJson = '';
+    function boot(d) {
       me = d;
-      var now = ymOf(new Date());
       minYm = me.from || addMonth(now, -3);
       maxYm = addMonth(now, 1);
-      ym = now < minYm ? minYm : now;
+      var want = !ym || ym < minYm ? (now < minYm ? minYm : now) : ym;
+      var moved = want !== ym;
+      ym = want;
       $('state').hidden = true; $('app').hidden = false; $('tabbar').hidden = false;
       renderNotice(now);
       renderAll();
-      $('actionbar').hidden = false;
-      var t = new URLSearchParams(location.search).get('tab');
-      switchTab(t === 'list' || t === 'places' ? t : 'input');
-      loadMonth();
-      loadShift();
+      if (!booted) {
+        booted = true;
+        $('actionbar').hidden = false;
+        var t = new URLSearchParams(location.search).get('tab');
+        switchTab(t === 'list' || t === 'places' ? t : 'input');
+      }
+      if (month && !moved) paintMonth();
+      return moved;
+    }
+    var cached = SiegNav.cacheGet(ckey('init'));
+    if (cached && cached.places && cached.homes) {
+      cachedJson = JSON.stringify(cached);
+      ym = now;
+      var cm = SiegNav.cacheGet(ckey('month')), cs = SiegNav.cacheGet(ckey('shift'));
+      if (cm && cm.ym === now && (!cached.from || cached.from <= now)) month = cm.data;
+      if (cs && cs.ym === now) { shifts = {}; shifts[now] = cs.days || {}; shiftHotel[now] = cs.hot || {}; }
+      boot(cached);
+    } else {
+      ym = now;   // 基本情報を待たずに、今月の一覧とシフトを同時に読みにいく
+    }
+    loadMonth();
+    loadShift();
+    call('init', {}, { retry: true }).then(function (d) {
+      SiegNav.cacheSet(ckey('init'), d);
+      initFresh = true;
+      // 前回の内容と同じなら描き直さない（開きかけの入力欄を閉じないため）
+      if (booted && JSON.stringify(d) === cachedJson) { me = d; updateSaveButton(); syncFs(); return; }
+      if (boot(d)) { month = null; loadMonth(); loadShift(); }
     }).catch(function (e) {
-      $('state').innerHTML = GasClient.errorHtml(e, '読み込めませんでした', 'もう一度読み込む');
+      $('state').hidden = false;
+      $('state').innerHTML = GasClient.errorHtml(e, booted ? '最新の内容を読み込めませんでした' : '読み込めませんでした', 'もう一度読み込む');
       $('state').querySelector('[data-sg-retry]').onclick = function () { location.reload(); };
     });
   }
@@ -428,7 +462,7 @@
 
   function renderAll() {
     renderSetup(); renderMonthBars(); renderCal(); renderRoute(); renderHome(); renderPlaces(); updateCalc();
-    $('full-name').value = me.fullName || '';
+    if (document.activeElement !== $('full-name')) $('full-name').value = me.fullName || '';
   }
 
   // ── はじめに ──
@@ -459,12 +493,16 @@
   Array.prototype.forEach.call(document.querySelectorAll('.m-prev'), function (b) { b.onclick = function () { changeMonth(-1); }; });
   Array.prototype.forEach.call(document.querySelectorAll('.m-next'), function (b) { b.onclick = function () { changeMonth(1); }; });
 
+  function paintMonth() { renderCal(); renderList(); renderSummary(); renderFromShift(); }
   function loadMonth() {
     var want = ym;
-    $('entries').innerHTML = '<div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div>';
+    // 前回の内容を出しているときは、灰色の枠に戻さない（裏で読んで置き換える）
+    if (!month) $('entries').innerHTML = '<div class="sg-skel-wrap" aria-busy="true" aria-label="読み込み中"><div class="sg-skel card"></div><div class="sg-skel card"></div><div class="sg-skel card"></div></div>';
     return call('listMonth', { ym: want }, { retry: true }).then(function (d) {
       if (want !== ym) return;
-      month = d; renderCal(); renderList(); renderSummary(); renderFromShift();
+      month = d;
+      if (want === ymOf(new Date())) SiegNav.cacheSet(ckey('month'), { ym: want, data: d });   // 次に開いたとき用（今月の分だけ）
+      if (me) paintMonth();   // 基本情報より先に届いたら、基本情報が届いたときに描く
     }).catch(function (e) {
       if (want !== ym) return;
       $('entries').innerHTML = '<div class="empty" style="color:var(--sg-red)">読み込めませんでした：' + esc(e.message) + '</div>';
@@ -505,7 +543,9 @@
       });
       shifts = shifts || {};
       Object.keys(out).forEach(function (k) { shifts[k] = out[k]; shiftHotel[k] = hot[k] || {}; });
-      renderCal(); renderFromShift();
+      var nowYm = ymOf(new Date());
+      if (want === nowYm) SiegNav.cacheSet(ckey('shift'), { ym: nowYm, days: shifts[nowYm] || {}, hot: shiftHotel[nowYm] || {} });
+      if (me) { renderCal(); renderFromShift(); }
     }).catch(function () { delete shiftAsked[want]; });
   }
   // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）。一覧を読み込むまでは出さない。
@@ -566,8 +606,8 @@
   function syncFs() {
     var b = $('fs-send'); if (!b) return;
     var rows = fsRows(), lack = rows.filter(function (r) { return !r.place; }).length;
-    b.disabled = !rows.length || lack > 0 || saving;
-    b.textContent = !rows.length ? '入れる日にチェックしてください' : lack ? '場所を選んでください（' + lack + '日）' : 'まとめて送る（' + rows.length + '日）';
+    b.disabled = !rows.length || lack > 0 || saving || !initFresh;
+    b.textContent = !rows.length ? '入れる日にチェックしてください' : lack ? '場所を選んでください（' + lack + '日）' : !initFresh ? '最新を確認中…' : 'まとめて送る（' + rows.length + '日）';
   }
   $('from-shift').addEventListener('change', function (ev) {
     var t = ev.target, d = Number(t.getAttribute('data-d')); if (!d) return;
@@ -791,11 +831,11 @@
   function updateSaveButton() {
     var n = Object.keys(picked).length, b = $('btn-save');
     var tooMany = rcQueue.length > 0 && n > 1;
-    var ok = !!preview && n > 0 && routeReady() && amountsOk() && !saving && !tooMany;
+    var ok = !!preview && n > 0 && routeReady() && amountsOk() && !saving && !tooMany && initFresh;
     b.disabled = !ok;
     // 押せないあいだは、ボタンの文字を「あと何をすればいいか」にする（sieg-nav.js が細い案内の1行に替える）
     b.textContent = saving ? '送信中…' : tooMany ? '領収書があるときは1日ずつ送ってください'
-      : !n ? '日付を選ぶと送信できます' : !routeReady() ? '行き先を選んでください' : !amountsOk() ? '金額を確かめてください' : !preview ? '距離を計算中…'
+      : !n ? '日付を選ぶと送信できます' : !routeReady() ? '行き先を選んでください' : !amountsOk() ? '金額を確かめてください' : !preview ? '距離を計算中…' : !initFresh ? '最新を確認中…'
       : n + '日分を送信する' + (rcQueue.length ? '（領収書' + rcQueue.length + '枚）' : '');
   }
 
