@@ -9,6 +9,9 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
+<!-- Google（GAS）への接続を先に始めておく（最初の読み込みが少し早くなる） -->
+<link rel="preconnect" href="https://script.google.com" crossorigin>
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 <link rel="stylesheet" href="sieg-theme.css">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -481,10 +484,26 @@
   var RETRY_WAIT_MS = 600;
 
   // 「元に戻す」を待っている削除があれば、ほかの書き込みの前に先に済ませる（順番が入れ替わらないように）
+  // 前回の内容を先に出しているあいだ（initFresh が false）は、書き込みを受け付けない
+  // （別の端末でシートの月が替わっていると、見えている月と違う月に書いてしまうため）。
+  // 同じ読み込みが同時に2本走らないよう、走っている最中の同じ読み込みは1本にまとめる
+  var initFresh = false, inflight = {};
   function callApi(action, params, timeoutMs, onRetry) {
+    if (/^get/.test(action) && !onRetry) {
+      var key = action + JSON.stringify(params || {});
+      if (inflight[key]) return inflight[key];
+      var done = function() { delete inflight[key]; };
+      var p = inflight[key] = callApiNow(action, params, timeoutMs);
+      p.then(done, done);
+      // 送ったあとに読み直した月の情報も、次に開いたとき用にしまっておく
+      if (action === 'getMonthInfo') p.then(function(info) { if (initFresh && info) SiegNav.cacheSet(cacheKey('init'), { monthInfo: info, placeList: placeList }); }, function() {});
+      return p;
+    }
     if (/^(get|export)/.test(action) || !window.SiegNav) return callApiNow(action, params, timeoutMs, onRetry);
+    if (!initFresh) return Promise.reject(new Error('最新の内容を確認しています。数秒待ってから、もう一度お試しください。'));
     return SiegNav.flushUndo().then(function() { return callApiNow(action, params, timeoutMs, onRetry); });
   }
+  function cacheKey(kind) { return 'commute:' + kind + ':' + currentStaff; }
   function callApiNow(action, params, timeoutMs, onRetry) {
     // GASはコールドスタートで数秒かかることがあるため、既定を長めに取る。
     timeoutMs = timeoutMs || 30000;
@@ -844,6 +863,19 @@
     hideLoadError();
     document.getElementById('irreg-rate-label').textContent = '自動計算される金額（距離 × ' + RATE_PER_KM + '円/km）';
 
+    // 前回の内容があれば、すぐ出す（裏で最新を読んで置き換える。送信は最新を読み終えてから）
+    initFresh = false;
+    var cached = !monthInfo && SiegNav.cacheGet(cacheKey('init'));
+    if (cached && cached.monthInfo && cached.placeList) {
+      applyInitial(cached);
+      var ymc = cached.monthInfo.year + '-' + cached.monthInfo.month;
+      var cm = SiegNav.cacheGet(cacheKey('mine')), cs = SiegNav.cacheGet(cacheKey('shift'));
+      mine = cm && cm.ym === ymc ? cm.list : null;
+      if (cs && cs.ym === ymc) { shiftDays = cs.days; shiftHotel = cs.hot || {}; }
+      renderGuide(); renderSummary(); renderCal(); renderFromShift();
+      document.body.classList.toggle('sg-two', document.getElementById('page-input').classList.contains('active'));
+    } else cached = null;
+
     // 読み込みを待つあいだも、今月のカレンダーの形だけ先に出しておく（押せない状態で薄く）
     if (!monthInfo) {
       var now = new Date();
@@ -857,19 +889,13 @@
     callApi('getInitialData', { staffName: currentStaff }, 40000, function(n, max) {
       monthEl.textContent = '読み込み中... (' + n + '/' + max + ')';
     }).then(function(res) {
-      monthInfo = res.monthInfo;
-      placeList = res.placeList;
-      document.getElementById('topbar-month').textContent = monthInfo.year + '年' + monthInfo.month + '月';
-      document.getElementById('irreg-capacity').textContent = '枠: ' + monthInfo.irregularCount + '/' + monthInfo.irregularCapacity;
-
-      calYear = monthInfo.year; calMonth = monthInfo.month;
-      calYearIrreg = monthInfo.year; calMonthIrreg = monthInfo.month;
-      document.getElementById('calGrid').classList.remove('loading');
-      var today = new Date();
-      document.getElementById('cal-today').hidden = !(today.getFullYear() === calYear && today.getMonth() + 1 === calMonth);
-      renderCal();
-      renderCalIrreg();
-      renderQuickPlaces();
+      // 前回の内容と月が違っていたら（別の端末で月を替えた）、選びかけは捨てる
+      if (cached && (cached.monthInfo.year !== res.monthInfo.year || cached.monthInfo.month !== res.monthInfo.month)) {
+        picked = {}; fsPick = {}; dayIrreg = null; mine = null; shiftDays = null; shiftHotel = {};
+      }
+      SiegNav.cacheSet(cacheKey('init'), { monthInfo: res.monthInfo, placeList: res.placeList });
+      initFresh = true;
+      applyInitial(res);
       afterLoad();
     }).catch(function(err) {
       // 名前の表記ゆれ・未登録は一覧を取り直して自動リカバリ
@@ -880,6 +906,23 @@
       monthEl.textContent = '読み込みエラー';
       showLoadError(err.message, err.detail);
     });
+  }
+
+  // 月の情報と場所の一覧を画面に入れる（前回の内容からも、最新からも呼ぶ。選びかけの日は消さない）
+  function applyInitial(res) {
+    monthInfo = res.monthInfo;
+    placeList = res.placeList;
+    document.getElementById('topbar-month').textContent = monthInfo.year + '年' + monthInfo.month + '月';
+    document.getElementById('irreg-capacity').textContent = '枠: ' + monthInfo.irregularCount + '/' + monthInfo.irregularCapacity;
+
+    calYear = monthInfo.year; calMonth = monthInfo.month;
+    calYearIrreg = monthInfo.year; calMonthIrreg = monthInfo.month;
+    document.getElementById('calGrid').classList.remove('loading');
+    var today = new Date();
+    document.getElementById('cal-today').hidden = !(today.getFullYear() === calYear && today.getMonth() + 1 === calMonth);
+    renderCal();
+    renderCalIrreg();
+    renderQuickPlaces();
   }
 
   function switchTab(tab) {
@@ -910,7 +953,9 @@
     var normal = currentType === 'normal';
     var n = normal ? pickedDays().length : (dayIrreg ? 1 : 0);
     var b = document.getElementById(normal ? 'btn-submit-normal' : 'btn-submit-irreg');
-    if (!sendingNow) { b.disabled = !n; b.textContent = normal && n > 1 ? n + '日分を送信する' : '送信する'; }
+    // 前回の内容を出しているあいだ（最新を読み終えるまで）は、選べるが送れない
+    var wait = n && !initFresh;
+    if (!sendingNow) { b.disabled = !n || wait; b.textContent = wait ? '最新を確認中…' : normal && n > 1 ? n + '日分を送信する' : '送信する'; }
     document.getElementById('action-hint').textContent = n ? '' : '日付を選ぶと送信できます';
   }
 
@@ -1463,7 +1508,12 @@
   }
   function loadMine() {
     if (SiegNav.wide() && document.getElementById('page-input').classList.contains('active')) loadEntries();   // パソコンは右の一覧も新しくする
-    callApi('getMyEntries', { staffName: currentStaff }).then(function(list) { mine = list || []; renderSummary(); renderFromShift(); })
+    var ymNow = monthInfo ? monthInfo.year + '-' + monthInfo.month : '';
+    callApi('getMyEntries', { staffName: currentStaff }).then(function(list) {
+      mine = list || [];
+      if (ymNow) SiegNav.cacheSet(cacheKey('mine'), { ym: ymNow, list: mine });
+      renderSummary(); renderFromShift();
+    })
       .catch(function() { mine = null; renderSummary(); renderFromShift(); });
   }
   function renderSummary() {
@@ -1503,7 +1553,11 @@
         return out;
       });
     }
-    p.then(function(sd) { shiftDays = sd; shiftHotel = sd ? hot : {}; renderCal(); renderFromShift(); }, function() { shiftDays = null; shiftHotel = {}; });
+    p.then(function(sd) {
+      shiftDays = sd; shiftHotel = sd ? hot : {};
+      if (sd) SiegNav.cacheSet(cacheKey('shift'), { ym: y + '-' + m, days: sd, hot: shiftHotel });
+      renderCal(); renderFromShift();
+    }, function() { shiftDays = null; shiftHotel = {}; });
   }
   // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）。
   // ホテル泊の日は自宅からの往復にならないので別あつかい（hotel を付けたときだけ返す。入れ忘れの印も付けない）
@@ -1561,8 +1615,8 @@
   function syncFs() {
     var b = document.getElementById('fs-send'); if (!b) return;
     var rows = fsRows(), lack = rows.filter(function(r) { return !r.place; }).length;
-    b.disabled = !rows.length || lack > 0;
-    b.textContent = !rows.length ? '入れる日にチェックしてください' : lack ? '場所を選んでください（' + lack + '日）' : 'まとめて送る（' + rows.length + '日）';
+    b.disabled = !rows.length || lack > 0 || !initFresh;
+    b.textContent = !rows.length ? '入れる日にチェックしてください' : lack ? '場所を選んでください（' + lack + '日）' : !initFresh ? '最新を確認中…' : 'まとめて送る（' + rows.length + '日）';
   }
   document.getElementById('from-shift').addEventListener('change', function(ev) {
     var t = ev.target, d = Number(t.getAttribute('data-d')); if (!d) return;
