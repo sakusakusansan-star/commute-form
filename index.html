@@ -1480,7 +1480,7 @@
     var R = window.SiegRoster, short = shortOf(currentStaff), y = monthInfo.year, m = monthInfo.month;
     var p, hot = {};   // hot：ホテル泊の日（自宅からの往復にならない）
     if (R && R.isPartner && R.isPartner(short)) {   // パートナー様（12月までこの画面の人）はパートナー用シフトから
-      p = R.shiftPartnerApi ? GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: short }, { retry: true }).then(function(r) {
+      p = R.shiftPartnerApi ? GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: short, year: y, month: m }, { retry: true }).then(function(r) {
         if (!r || !r.ok) return null;
         var out = {};
         (r.data || []).forEach(function(x) {
