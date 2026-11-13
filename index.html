@@ -197,6 +197,8 @@
   .fs-row .d small { display: block; font-size: 11px; color: var(--sg-mute); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 6em; }
   .fs-row select { min-height: 42px; padding: 8px 10px; font-size: 14px; }
   .fs-row.nomatch select { border-color: var(--sg-amber); }
+  .fs-row .d small i { font-style: normal; color: var(--sg-amber); font-weight: 800; }
+  .fshift p b { color: var(--sg-amber); }
   .fs-send { width: 100%; margin-top: 10px; min-height: 48px; border: 0; border-radius: var(--sg-r-sm); background: var(--sg-primary); color: var(--sg-on-primary); font-size: 15px; font-weight: 800; }
   .fs-send:disabled { opacity: .45; }
   .fs-msg { font-size: 13px; margin-top: 8px; }
@@ -1476,31 +1478,42 @@
   function loadShift() {
     if (!monthInfo || !window.GasClient) return;
     var R = window.SiegRoster, short = shortOf(currentStaff), y = monthInfo.year, m = monthInfo.month;
-    var p;
+    var p, hot = {};   // hot：ホテル泊の日（自宅からの往復にならない）
     if (R && R.isPartner && R.isPartner(short)) {   // パートナー様（12月までこの画面の人）はパートナー用シフトから
       p = R.shiftPartnerApi ? GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: short }, { retry: true }).then(function(r) {
         if (!r || !r.ok) return null;
         var out = {};
-        (r.data || []).forEach(function(x) { if (Number(x.year) !== y || Number(x.month) !== m) return; for (var d = x.startDay; d <= x.endDay; d++) out[d] = x.place || x.torihiki || ''; });
+        (r.data || []).forEach(function(x) {
+          if (Number(x.year) !== y || Number(x.month) !== m) return;
+          for (var d = x.startDay; d <= x.endDay; d++) { out[d] = x.place || x.torihiki || ''; if (x.hotel) hot[d] = String(x.hotel); }
+        });
         return out;
       }) : Promise.resolve(null);
     } else {
       p = GasClient.get(STAFF_SHIFT_API, { action: 'list', name: short, year: y, month: m }).then(function(r) {
         if (!r || !r.ok) return null;
         var out = {};
-        Object.keys(r.days || {}).forEach(function(d) { var e = r.days[d] || {}; out[Number(d)] = e.place || e.client || ''; });
+        Object.keys(r.days || {}).forEach(function(d) {
+          var e = r.days[d] || {};
+          // 希望休・店休日など（取引先が空で、場所の欄にだけ書いてある日）は稼働日ではないので入れない
+          if (!e.client) return;
+          out[Number(d)] = e.place || e.client || '';
+          if (e.hotel) hot[Number(d)] = String(e.hotel);
+        });
         return out;
       });
     }
-    p.then(function(sd) { shiftDays = sd; renderCal(); renderFromShift(); }, function() { shiftDays = null; });
+    p.then(function(sd) { shiftDays = sd; shiftHotel = sd ? hot : {}; renderCal(); renderFromShift(); }, function() { shiftDays = null; shiftHotel = {}; });
   }
-  // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）
-  function missDays(withToday) {
+  // シフトの日で、まだ入れていない日（withToday なら、きょうも入れる）。
+  // ホテル泊の日は自宅からの往復にならないので別あつかい（hotel を付けたときだけ返す。入れ忘れの印も付けない）
+  var shiftHotel = {};
+  function missDays(withToday, hotel) {
     if (!shiftDays || !monthInfo) return [];
     var t = new Date(), sk = ymKey(monthInfo.year, monthInfo.month), nk = ymKey(t.getFullYear(), t.getMonth() + 1);
     if (sk > nk) return [];
     var limit = sk < nk ? 99 : t.getDate() - (withToday ? 0 : 1), filled = monthInfo.filledDays || [];
-    return Object.keys(shiftDays).map(Number).filter(function(d) { return d <= limit && filled.indexOf(d) < 0; }).sort(function(a, b) { return a - b; });
+    return Object.keys(shiftDays).map(Number).filter(function(d) { return d <= limit && filled.indexOf(d) < 0 && !!shiftHotel[d] === !!hotel; }).sort(function(a, b) { return a - b; });
   }
   // シフトの現場の書き方 → 稼働場所の一覧の名前（そろっていれば。あいまいなら空＝選んでもらう）
   function normPlace(v) { return String(v || '').replace(/[\s　・･\-]/g, '').replace(/店$/, '').toLowerCase(); }
@@ -1514,18 +1527,22 @@
   }
   function renderFromShift() {
     var el = document.getElementById('from-shift'), days = missDays(true);
+    // ホテル泊の日は、ふつうの日の候補があるときだけ一緒に出す（チェックは外しておく）
+    var hdays = days.length ? missDays(true, true) : [], todo = days.length;
+    days = days.concat(hdays).sort(function(a, b) { return a - b; });
     if (!days.length || !placeList.length || !monthInfo) {
       if (fsLast && monthInfo) { el.innerHTML = '<div class="fs-msg ' + fsLast.cls + '">' + escapeHtml(fsLast.text) + '</div>'; el.hidden = false; fsLast = null; return; }
       el.hidden = true; el.innerHTML = ''; return;
     }
     var y = monthInfo.year, m = monthInfo.month;
     var opts = function(sel) { return '<option value="">場所を選ぶ…</option>' + placeList.map(function(p) { return '<option' + (p === sel ? ' selected' : '') + '>' + escapeHtml(p) + '</option>'; }).join(''); };
-    el.innerHTML = '<h2>シフトからまとめて入れる<small>まだ ' + days.length + '日</small></h2>'
-      + '<p>シフトの日で、まだ入れていない日です。場所を確かめて送ってください。高速を使った日は、チェックを外して下のカレンダーから入れてください。</p>'
+    el.innerHTML = '<h2>シフトからまとめて入れる<small>まだ ' + todo + '日</small></h2>'
+      + '<p>シフトの日で、まだ入れていない日です。場所を確かめて送ってください。高速を使った日は、チェックを外して下のカレンダーから入れてください。'
+      + (hdays.length ? '<br><b>ホテル泊</b>の日は自宅からの往復にならないので、チェックを外してあります。' : '') + '</p>'
       + days.map(function(d) {
-        var sp = shiftDays[d], f = fsPick[d], mp = f ? f.place : matchPlace(sp), on = f ? f.on : !!mp;
-        return '<div class="fs-row' + (mp ? '' : ' nomatch') + '"><input type="checkbox" data-d="' + d + '" aria-label="' + m + '月' + d + '日を入れる"' + (on ? ' checked' : '') + '>'
-          + '<span class="d">' + m + '/' + d + '（' + DOWJ[new Date(y, m - 1, d).getDay()] + '）<small>' + escapeHtml(sp || 'シフト') + '</small></span>'
+        var sp = shiftDays[d], ht = !!shiftHotel[d], f = fsPick[d], mp = f ? f.place : matchPlace(sp), on = f ? f.on : (!!mp && !ht);
+        return '<div class="fs-row' + (mp ? '' : ' nomatch') + (ht ? ' hotel' : '') + '"><input type="checkbox" data-d="' + d + '" aria-label="' + m + '月' + d + '日を入れる' + (ht ? '（ホテル泊）' : '') + '"' + (on ? ' checked' : '') + '>'
+          + '<span class="d">' + m + '/' + d + '（' + DOWJ[new Date(y, m - 1, d).getDay()] + '）<small>' + (ht ? '<i>ホテル泊</i>' : escapeHtml(sp || 'シフト')) + '</small></span>'
           + '<select data-d="' + d + '" aria-label="' + m + '月' + d + '日の稼働場所">' + opts(mp) + '</select></div>';
       }).join('')
       + '<button type="button" class="fs-send" id="fs-send"></button><div class="fs-msg' + (fsLast ? ' ' + fsLast.cls : '') + '" id="fs-msg" role="status">' + (fsLast ? escapeHtml(fsLast.text) : '') + '</div>';
