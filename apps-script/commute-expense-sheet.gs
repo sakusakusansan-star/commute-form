@@ -66,6 +66,9 @@ const CONFIG = {
   // スタッフ名 → 自宅の短縮名（稼働場所リストと一致させる）
   // 両方のブックで同じ一覧を使う。そのブックに同名のシートが無い人は
   // フォームの名前一覧に出ない（getStaffInBook_）。
+  // ★ 社員が増えたら、みんなの状況の「名簿」で足す（社員・フルネーム・稼働費に印）。ここは直さなくてよい。
+  //   名簿の人は、自宅の短縮名を「名字＋自宅」（例：佐藤自宅）として使い、シートが無ければ作る（staffHome_）。
+  //   その人の自宅は、稼働費の画面の「場所」で「佐藤自宅」を住所で登録する。
   STAFF_HOME: {
     '福山康平': '福山自宅',
     '古川泰成': '古川自宅',
@@ -87,12 +90,97 @@ const CONFIG = {
   ROUTE_CACHE_SEC: 21600,             // 同一経路の距離キャッシュ保持時間（秒・最大6時間）
 };
 
+// ── 名簿（日報のスプレッドシートの「名簿」シート）───────────────
+const ROSTER_BOOK_ID = '1ffkmHDt_sz1ZQ3ZB_fXIaJeFhuW0wSI7bqwMpC9Z33g';
+// 名簿の人（外した人も入れる）。名簿シートがまだ無い・読めないときは null。2分覚えておく
+function roster_() {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) {}
+  var hit = cache && cache.get('roster:v1');
+  if (hit) { try { return JSON.parse(hit); } catch (e) {} }
+  var list = null;
+  try {
+    var sh = SpreadsheetApp.openById(ROSTER_BOOK_ID).getSheetByName('名簿');
+    if (sh && sh.getLastRow() >= 2) {
+      list = sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues().filter(function(r) { return String(r[0]).trim(); }).map(function(r) {
+        return { name: String(r[0]).trim(), group: String(r[1]).indexOf('パートナー') >= 0 ? 'partner' : 'staff',
+          full: String(r[2] || '').replace(/[\s\u3000]/g, ''), commute: String(r[4]).trim() !== '', hidden: String(r[7] || '').trim() !== '' };
+      });
+    }
+  } catch (e) { list = null; }
+  try { if (cache) cache.put('roster:v1', JSON.stringify(list), 120); } catch (e) {}
+  return list;
+}
+// このGASを使う人：フルネーム → 自宅の短縮名。
+// 名簿があれば、CONFIG.STAFF_HOME の人（名簿で外した人をのぞく）＋ 名簿の社員で「稼働費」に印とフルネームのある人。
+// 名簿が読めなければ CONFIG.STAFF_HOME のまま
+function staffHome_() {
+  var r = roster_();
+  if (!r) return CONFIG.STAFF_HOME;
+  var out = {}, hidden = {};
+  r.forEach(function(p) { if (p.hidden) { hidden[p.name] = true; if (p.full) hidden[p.full] = true; } });
+  Object.keys(CONFIG.STAFF_HOME).forEach(function(full) {
+    if (!hidden[full] && !hidden[shortName_(full)]) out[full] = CONFIG.STAFF_HOME[full];
+  });
+  r.forEach(function(p) {
+    if (p.group === 'staff' && p.commute && p.full && !p.hidden && !out[p.full]) out[p.full] = p.name + '自宅';
+  });
+  return out;
+}
+function isStaffName_(name) { return Object.prototype.hasOwnProperty.call(staffHome_(), String(name || '')); }
+// 名簿に足した社員のシートを、このブックに作る（ほかの社員のシートを写して、今の月のカレンダーを空で作り直す）。
+// 社員のシートがあるブック（福山・古川・清田のブック）だけで作り、山口さんのブックでは作らない
+function createStaffSheet_(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(name);
+  if (sheet) return sheet;
+  var r = roster_();
+  if (!r) return null;
+  var staffFull = r.filter(function(p) { return p.group === 'staff' && p.full; }).map(function(p) { return p.full; });
+  var tpl = null;
+  Object.keys(CONFIG.STAFF_HOME).concat(staffFull).some(function(n) {
+    if (n === name || staffFull.indexOf(n) < 0) return false;   // 見本は名簿の社員のシート
+    tpl = ss.getSheetByName(n);
+    return !!tpl;
+  });
+  if (!tpl) return null;
+  sheet = tpl.copyTo(ss);
+  try {
+    sheet.setName(name);
+  } catch (e) {
+    ss.deleteSheet(sheet);
+    return ss.getSheetByName(name);
+  }
+  // 上の見出しにある、見本の人の名前を新しい人に（数式のセルは触らない）
+  var tplName = tpl.getName(), tplShort = shortName_(tplName), newShort = shortName_(name);
+  var head = sheet.getRange(1, 1, CONFIG.dataStartRow - 1, CONFIG.COL.NOTE);
+  var vals = head.getValues(), fx = head.getFormulas(), changed = false;
+  for (var i = 0; i < vals.length; i++) for (var j = 0; j < vals[i].length; j++) {
+    var v = vals[i][j];
+    if (fx[i][j] || typeof v !== 'string' || !v) continue;
+    var nv = v.split(tplName).join(name);
+    if (nv === v && tplShort !== tplName) nv = v.split(tplShort).join(newShort);
+    if (nv !== v) { vals[i][j] = nv; changed = true; }
+  }
+  if (changed) head.setValues(vals.map(function(row, i) { return row.map(function(v, j) { return fx[i][j] ? fx[i][j] : v; }); }));
+  var month = Number(tpl.getRange(CONFIG.MONTH_ROW, CONFIG.MONTH_COL).getValue());
+  if (month >= 1 && month <= 12) buildMonthRows(sheet, month, sheetYear_(tpl, month));
+  setupDropdowns(sheet);
+  SpreadsheetApp.flush();
+  return sheet;
+}
+// 最初に一度エディタで実行して、日報のスプレッドシート（名簿）を読む権限を許可する
+function checkRoster() {
+  var r = roster_();
+  Logger.log(r ? '名簿 ' + r.length + '人。このGASを使う人：' + Object.keys(staffHome_()).join('・') : '名簿シートが読めません（まだ無いか、権限がありません）');
+}
+
 // ▼▼▼ PDFの保存先（Googleドライブ「経費精算」フォルダの中） ▼▼▼
 // 社員は「社員」、パートナーは「パートナー」フォルダに分けて、人ごとのフォルダに
 //   社員/福山/2026年/10月/2026-10_福山_稼働費.pdf
 // のように保存する（年・月のフォルダは無ければ自動で作る）。
 // 経費精算のGASも同じ場所・同じ名前の付け方なので、1つの月フォルダに両方が並ぶ。
-// パートナーが増えたら PARTNER_NAMES に名字を足す（鈴木・毛利・山内は先に入れてある）。
+// 社員かパートナーかは名簿で決める（名簿が読めないときだけ PARTNER_NAMES）。
 const PDF_FOLDER_ID = {
   staff:   "1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o",   // 経費精算/社員
   partner: "1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K",   // 経費精算/パートナー
@@ -104,7 +192,7 @@ const SHORT_NAMES = ['福山', '古川', '清田', '福岡', '山口', '鈴木',
 const WEEKDAY_JA = ['日','月','火','水','木','金','土'];
 
 // コードの版。/exec をブラウザで開くと表示されるので、再デプロイが反映されたかの確認に使う。
-const CODE_VERSION = '2026-11-07';
+const CODE_VERSION = '2026-11-17';
 
 // ── 年の判定 ─────────────────────────────────────────────────
 // 以前は年を 2026 に固定していたため、年をまたぐと
@@ -134,7 +222,16 @@ function sheetYear_(sheet, month) {
 // このブックにシートがあるスタッフだけを返す
 function getStaffInBook_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  return Object.keys(CONFIG.STAFF_HOME).filter(function(name) {
+  const home = staffHome_();
+  const names = Object.keys(home);
+  // 名簿に足した社員でシートがまだ無い人は、社員のシートがあるブックなら作る
+  const r = roster_();
+  if (r) {
+    const staffFull = r.filter(function(p) { return p.group === 'staff' && p.full; }).map(function(p) { return p.full; });
+    const mainBook = staffFull.some(function(n) { return !!ss.getSheetByName(n); });
+    if (mainBook) names.forEach(function(n) { if (!ss.getSheetByName(n) && staffFull.indexOf(n) >= 0) { try { createStaffSheet_(n); } catch (e) {} } });
+  }
+  return names.filter(function(name) {
     return !!ss.getSheetByName(name);
   });
 }
@@ -169,7 +266,7 @@ function initialSetup() {
     return;
   }
 
-  Object.keys(CONFIG.STAFF_HOME).forEach(name => {
+  Object.keys(staffHome_()).forEach(name => {
     const sheet = ss.getSheetByName(name);
     if (!sheet) return;
     setupDropdowns(sheet);
@@ -245,7 +342,7 @@ function testExportPdf() {
     // エディタ実行ではアクティブシートを取れないことがあるので後段でフォールバック
   }
   // アクティブシートがスタッフシートでなければ、設定済みスタッフの先頭を使う
-  if (!CONFIG.STAFF_HOME[name]) {
+  if (!isStaffName_(name)) {
     name = getStaffInBook_()[0];
   }
 
@@ -264,7 +361,7 @@ function updateMonth() {
   const sheet = ss.getActiveSheet();
   const name  = sheet.getName();
 
-  if (!CONFIG.STAFF_HOME[name]) {
+  if (!isStaffName_(name)) {
     ui.alert('スタッフシートを選択してから実行してください。');
     return;
   }
@@ -424,7 +521,7 @@ function setupDropdowns(sheet) {
 function handleEdit(e) {
   const sheet    = e.range.getSheet();
   const staffName = sheet.getName();
-  if (!CONFIG.STAFF_HOME[staffName]) return;
+  if (!isStaffName_(staffName)) return;
 
   const editedCol = e.range.getColumn();
   const editedRow = e.range.getRow();
@@ -464,7 +561,7 @@ function updateRowDistance(sheet, staffName, row, placeMap) {
     placeMap = getPlaceMap(SpreadsheetApp.getActiveSpreadsheet());
   }
 
-  const homeShort = CONFIG.STAFF_HOME[staffName];
+  const homeShort = staffHome_()[staffName];
   const homeAddr  = placeMap[homeShort];
   const destAddr  = placeMap[placeShort];
 
@@ -541,7 +638,7 @@ function refreshAllDistances() {
   const sheet = ss.getActiveSheet();
   const name  = sheet.getName();
 
-  if (!CONFIG.STAFF_HOME[name]) {
+  if (!isStaffName_(name)) {
     ui.alert('スタッフシートを選択してから実行してください。');
     return;
   }
@@ -757,11 +854,12 @@ function doPost(e) {
 
 // ── スタッフ名からシートを取得 ────────────────────────────
 function getCommuteSheet(staffName) {
-  if (!CONFIG.STAFF_HOME[staffName]) {
+  if (!isStaffName_(staffName)) {
     throw new Error('不明なスタッフです: ' + staffName);
   }
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName(staffName);
+  if (!sheet) sheet = createStaffSheet_(staffName);   // 名簿に足されたばかりの社員（作れないブックでは null）
   if (!sheet) {
     throw new Error('シートが見つかりません: ' + staffName);
   }
@@ -930,7 +1028,7 @@ function deletePlaceWeb(row) {
 // ── 全スタッフシートのプルダウンを再設定 ─────────────────────
 function refreshAllStaffDropdowns() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  Object.keys(CONFIG.STAFF_HOME).forEach(function(name) {
+  Object.keys(staffHome_()).forEach(function(name) {
     var sheet = ss.getSheetByName(name);
     if (sheet) setupDropdowns(sheet);
   });
@@ -943,7 +1041,7 @@ function renamePlaceInStaffSheets(oldName, newName) {
   var startRow = CONFIG.dataStartRow;
   var FIXED_DAYS = 31;
 
-  Object.keys(CONFIG.STAFF_HOME).forEach(function(staffName) {
+  Object.keys(staffHome_()).forEach(function(staffName) {
     var sheet = ss.getSheetByName(staffName);
     if (!sheet) return;
     var range = sheet.getRange(startRow, C.PLACE, FIXED_DAYS, 1);
@@ -1182,6 +1280,10 @@ function saveAttachmentWeb(staffName, kind, index, mimeType, base64) {
 
 function shortName_(name) {
   var n = String(name || '').replace(/[\s\u3000]/g, '');
+  var r = roster_() || [];
+  for (var j = 0; j < r.length; j++) {
+    if (r[j].name === n || (r[j].full && r[j].full === n)) return r[j].name;
+  }
   for (var i = 0; i < SHORT_NAMES.length; i++) {
     if (n.indexOf(SHORT_NAMES[i]) === 0) return SHORT_NAMES[i];
   }
@@ -1189,7 +1291,11 @@ function shortName_(name) {
 }
 
 function isPartner_(name) {
-  return PARTNER_NAMES.indexOf(shortName_(name)) >= 0;
+  var sn = shortName_(name), r = roster_();
+  if (r) {
+    for (var i = 0; i < r.length; i++) if (r[i].name === sn) return r[i].group === 'partner';
+  }
+  return PARTNER_NAMES.indexOf(sn) >= 0;
 }
 
 // 例：pdfFileName_('福山康平', 2026, 10, '稼働費') → '2026-10_福山_稼働費.pdf'

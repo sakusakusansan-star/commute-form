@@ -283,4 +283,19 @@ sheets['人']._g.push(['毛利', '', '福岡県飯塚市枝国1-2-3', new Date()
 const mouri = o => doPost({ postData: { contents: JSON.stringify(Object.assign({ name: '毛利' }, o)) } });
 assert.deepStrictEqual(mouri({ action: 'init' }).data.homes.map(h => h.label), ['自宅']);
 assert.deepStrictEqual(mouri({ action: 'saveHome', label: '実家', address: '福岡県春日市星見ヶ丘3丁目' }).data.homes.map(h => h.label + '|' + h.main), ['自宅|true', '実家|false']);
+// 名簿B：使える人は名簿のパートナーで「稼働費」に印のある人（外した人をのぞく）。from は PARTNERS から
+const who = (name, o) => doPost({ postData: { contents: JSON.stringify(Object.assign({ name }, o)) } });
+assert.strictEqual(who('田中', { action: 'init' }).ok, false, '名簿が無いときは PARTNERS');
+const rs = ss.insertSheet('名簿');
+rs._g.push(['名前', '区分', 'フルネーム', 'キャリア', '稼働費', '経費精算', 'みんなの状況', '外した日', '直した日時']);
+rs._g.push(['山口', 'パートナー', '山口真人', 'au', '○', '', '', '', '']);
+rs._g.push(['毛利', 'パートナー', '', '', '○', '', '', '2026-12-01', '']);
+rs._g.push(['田中', 'パートナー', '田中一郎', '', '○', '', '', '', '']);
+rs._g.push(['佐藤', 'パートナー', '', '', '', '', '', '', '']);
+rs._g.push(['福山', '社員', '福山康平', '', '○', '○', '', '', '']);
+let t = who('田中', { action: 'init' });
+assert.ok(t.ok, t.error);
+assert.deepStrictEqual([t.data.fullName, t.data.from], ['田中一郎', '']);
+assert.strictEqual(who('山口', { action: 'init' }).data.from, '2026-12', 'from は PARTNERS のまま');
+['毛利', '佐藤', '福山', '鈴木'].forEach(n => assert.strictEqual(who(n, { action: 'init' }).ok, false, n + ' は使えない'));
 console.log('partner-commute: all tests passed');
