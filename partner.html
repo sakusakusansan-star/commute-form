@@ -205,6 +205,15 @@
     body.sg-two .isum button { display: none; }
     body.sg-two #page-list .month-bar { display: none; }
   }
+
+  /* ═══ 新しいデザイン：カレンダーは社員のシフト入力と同じ箱の形（押せる日がひと目で分かる） ═══ */
+  .cal-grid { gap: 4px; }
+  .cal-day:not(.empty) { background: var(--sg-sunk); border: 1px solid var(--sg-hair); border-radius: 10px; }
+  .cal-day.on, .cal-day.start, .cal-day.end { background: var(--sg-primary); border-color: var(--sg-primary); }
+  .cal-day.in-range { background: var(--sg-blue-tint); border-color: transparent; }
+  .total .v, .entry .a { font-family: var(--sg-num); font-weight: 700; }
+  .total .v { font-size: 36px; }
+  .entry .a { font-size: 20px; }
 </style>
 </head>
 <body class="has-tabbar has-actionbar">
@@ -901,7 +910,7 @@
       return '<div class="entry' + (e.stops.length > 3 ? ' via' : '') + '"><div class="top"><span class="d">' + esc(dayText(e.date)) + '</span><span class="a">' + yen(e.total) + '</span></div>'
         + '<div class="r">' + esc(e.text) + '</div><div class="x">' + esc(extra.join('・')) + (e.note ? '<br>' + esc(e.note) : '') + '</div>'
         + (rc.length ? '<ul class="rc-mini">' + rc.map(function (f) { return miniLi(f); }).join('') + '</ul>' : '')
-        + '<div class="acts"><button type="button" class="btn sub" data-edit="' + esc(e.id) + '">直す</button><button type="button" class="btn danger" data-del="' + esc(e.id) + '">削除</button>'
+        + '<div class="acts"><button type="button" class="btn sub" data-edit="' + esc(e.id) + '">直す</button><button type="button" class="btn danger" data-del="' + esc(e.id) + '">消す</button>'
         + (e.parking ? '<button type="button" class="btn add" data-radd="parking" data-date="' + esc(e.date) + '">＋ 駐車場の領収書</button>' : '')
         + (e.toll ? '<button type="button" class="btn add" data-radd="toll" data-date="' + esc(e.date) + '">＋ 高速の領収書</button>' : '')
         + '</div></div>';
