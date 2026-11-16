@@ -13,10 +13,12 @@ function Sheet(name, parent) {
     getValue: () => get(r, c),
     getValues: () => Array.from({ length: nr || 1 }, (_, i) => Array.from({ length: nc || 1 }, (_, j) => get(r + i, c + j))),
     setValues(v) { v.forEach((row, i) => row.forEach((x, j) => set(r + i, c + j, x))); return this; },
-    setValue(v) { set(r, c, v); return this; }
+    setValue(v) { set(r, c, v); return this; },
+    getFormulas: () => Array.from({ length: nr || 1 }, () => Array.from({ length: nc || 1 }, () => ''))
   });
   return chain({
     _g: g, _set: set, getName: () => name, getParent: () => parent,
+    copyTo(book) { const c = Sheet(name + ' のコピー', book); g.forEach((row, i) => (row || []).forEach((v, j) => c._set(i + 1, j + 1, v))); c.setName = n => { if (sheets[n]) throw new Error('dup'); delete sheets[c.getName()]; c.getName = () => n; sheets[n] = c; return c; }; sheets[c.getName()] = c; return c; },
     getRange: (a, c, nr, nc) => range(a, c, nr, nc),
     getLastRow: () => { let n = g.length; while (n && !(g[n - 1] || []).some(x => x !== '' && x !== undefined)) n--; return n; },
     appendRow(row) { const r = this.getLastRow() + 1; row.forEach((x, j) => set(r, j + 1, x)); },
@@ -25,7 +27,8 @@ function Sheet(name, parent) {
 }
 const sheets = {};
 const ss = { getSheetByName: n => sheets[n] || null, insertSheet: n => (sheets[n] = Sheet(n, ss)) };
-global.SpreadsheetApp = { getActiveSpreadsheet: () => ss, flush() {}, BorderStyle: { SOLID: 1 } };
+let rosterBook = null;   // 日報のスプレッドシート（名簿）。null のうちは名簿が無い
+global.SpreadsheetApp = { getActiveSpreadsheet: () => ss, openById: () => rosterBook || { getSheetByName: () => null }, flush() {}, BorderStyle: { SOLID: 1 }, newDataValidation: () => chain({}) };
 global.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) };
 global.ContentService = { MimeType: { JSON: 'json' }, createTextOutput: t => ({ t, setMimeType() { return this; } }) };
 global.PropertiesService = { getScriptProperties: () => ({ getProperty: () => null }) };
@@ -81,4 +84,38 @@ assert.strictEqual(archiveMonth_('福山康平', s), 0, '空の月は写さな�
 assert.strictEqual(getHistoryWeb('福山康平', '2026-10').entries.length, 3);
 assert.strictEqual(getHistoryWeb('福山康平', '2026-11').found, false);
 assert.strictEqual(getStaffInBook_().indexOf('稼働費履歴'), -1, '履歴シートは名前の一覧に出ない');
+// ── 名簿B：名簿の社員（稼働費に印・フルネーム）は、シートが無ければ作る。外した人は使えない ──
+assert.deepStrictEqual(post({ action: 'getStaffList' }).data, ['福山康平'], '名簿が無いときは STAFF_HOME（シートのある人）');
+const rs = Sheet('名簿', null);
+[['名前', '区分', 'フルネーム', 'キャリア', '稼働費', '経費精算', 'みんなの状況', '外した日', '直した日時'],
+ ['福山', '社員', '福山康平', '', '○', '○', '', '', ''],
+ ['古川', '社員', '古川泰成', '', '○', '○', '', '2026-11-01', ''],
+ ['佐藤', '社員', '佐藤 次郎', '', '○', '', '', '', ''],
+ ['田中', 'パートナー', '田中一郎', '', '○', '', '', '', ''],
+ ['伊藤', '社員', '', '', '○', '', '', '', '']].forEach((row, i) => row.forEach((v, j) => rs._set(i + 1, j + 1, v)));
+rosterBook = { getSheetByName: n => (n === '名簿' ? rs : null) };
+s._set(1, 1, '稼働費精算書　福山康平');
+assert.deepStrictEqual(staffHome_(), { '福山康平': '福山自宅', '清田和男': '清田自宅', '山口真人': '山口自宅', '佐藤次郎': '佐藤自宅' },
+  '外した古川・パートナーの田中・フルネームの無い伊藤はのぞく。佐藤は「名字＋自宅」');
+assert.deepStrictEqual(post({ action: 'getStaffList' }).data, ['福山康平', '佐藤次郎'], '佐藤のシートができて一覧に出る');
+const sato = ss.getSheetByName('佐藤次郎');
+assert.ok(sato);
+assert.strictEqual(sato._g[0][0], '稼働費精算書　佐藤次郎', '見出しの名前は本人に');
+assert.strictEqual(sato._g[1][6], s._g[1][6], '月は見本と同じ');
+r = post({ action: 'getMonthInfo', staffName: '佐藤次郎' });
+assert.ok(r.ok, r.error);
+assert.deepStrictEqual(r.data.filledDays, [], '中身は空');
+assert.strictEqual(r.data.irregularCount, 0);
+assert.strictEqual(post({ action: 'getMonthInfo', staffName: '古川泰成' }).ok, false, '外した人');
+// 社員かパートナーかは名簿（PDF のフォルダ）
+assert.strictEqual(isPartner_('田中一郎'), true);
+assert.strictEqual(isPartner_('佐藤次郎'), false);
+assert.strictEqual(shortName_('佐藤次郎'), '佐藤');
+// 山口さんのブック（名簿の社員のシートが無い）では作らない
+const yss = { getSheetByName: n => (n === '山口真人' ? s : null) };
+const keep = SpreadsheetApp.getActiveSpreadsheet;
+SpreadsheetApp.getActiveSpreadsheet = () => ({ getSheetByName: n => (n === '山口真人' ? Sheet('山口真人', null) : null) });
+assert.strictEqual(createStaffSheet_('佐藤次郎'), null);
+SpreadsheetApp.getActiveSpreadsheet = keep;
+console.log('✓ 名簿B：名簿の社員のシートを作る・外した人は使えない');
 console.log('commute-history: all tests passed');

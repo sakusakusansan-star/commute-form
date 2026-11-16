@@ -21,20 +21,59 @@
 //   ウェブアプリとしてデプロイ（実行するユーザー：自分／アクセス：全員）。
 //   シートは最初に呼ばれたときに自動で作る。関数を手で実行する必要はない。
 //
-//  【パートナーが増えたら】PARTNERS に名字を足す（名簿 sieg-roster.js と同じ名前）。
+//  【パートナーが増えたら】みんなの状況の「名簿」で足す（パートナー・稼働費に印）。ここは直さなくてよい。
+//   この画面を使えるのは、名簿（日報のスプレッドシートの「名簿」シート）のパートナーで「稼働費」に印のある人。
+//   名簿シートがまだ無い・読めないときだけ、下の PARTNERS を使う。
 // ============================================================
 
 var SHEET_ID = '19TTixFCWjVUR9S4XvsMjdbQt_U3v4MlCdvVpgTMsK_U';   // パートナー_交通費（12月〜）
-var CODE_VERSION = '2026-11-06b';
+var CODE_VERSION = '2026-11-17';
 var RATE_PER_KM = 15;
 
 // 名前 → { full: PDFに載せる氏名（本人が画面で登録すればそちらを使う）, from: この画面で入力できる最初の月 }
+// from を書いた人は、名簿から読んだときもその月から（full は名簿のフルネームが先）
 var PARTNERS = {
   '山口': { full: '山口真人', from: '2026-12' },   // 11月分までは前の画面（山口_稼働費計算_GAS版）
   '鈴木': {},
   '毛利': {},
   '山内': {}
 };
+var ROSTER_BOOK_ID = '1ffkmHDt_sz1ZQ3ZB_fXIaJeFhuW0wSI7bqwMpC9Z33g';   // 日報のスプレッドシート（「名簿」シート）
+
+// 名簿の人（外した人も入れる）。名簿シートがまだ無い・読めないときは null。2分覚えておく
+function roster_() {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) {}
+  var hit = cache && cache.get('roster:v1');
+  if (hit) { try { return JSON.parse(hit); } catch (e) {} }
+  var list = null;
+  try {
+    var sh = SpreadsheetApp.openById(ROSTER_BOOK_ID).getSheetByName('名簿');
+    if (sh && sh.getLastRow() >= 2) {
+      list = sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues().filter(function(r) { return String(r[0]).trim(); }).map(function(r) {
+        var tools = [];
+        if (String(r[4]).trim()) tools.push('commute');
+        if (String(r[5]).trim()) tools.push('keihi');
+        return { name: String(r[0]).trim(), group: String(r[1]).indexOf('パートナー') >= 0 ? 'partner' : 'staff',
+          full: String(r[2] || '').trim(), tools: tools, hidden: String(r[7] || '').trim() !== '' };
+      });
+    }
+  } catch (e) { list = null; }
+  try { if (cache) cache.put('roster:v1', JSON.stringify(list), 120); } catch (e) {}
+  return list;
+}
+// この画面を使える人 → { full, from }
+function partners_() {
+  var r = roster_();
+  if (!r) return PARTNERS;
+  var out = {};
+  r.forEach(function(p) {
+    if (p.group !== 'partner' || p.hidden || p.tools.indexOf('commute') < 0) return;
+    var base = Object.prototype.hasOwnProperty.call(PARTNERS, p.name) ? PARTNERS[p.name] : {};
+    out[p.name] = { full: p.full || base.full || '', from: base.from || '' };
+  });
+  return out;
+}
 
 var PDF_FOLDER_ID = '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K';   // 経費精算/パートナー
 var MAX_HOMES = 3;           // 自宅は3か所まで（実家とアパートなど）
@@ -89,14 +128,14 @@ function dateText_(v) {
 // ── 人・月の確かめ ──────────────────────────────────────
 function checkName_(name) {
   name = String(name || '');
-  if (!Object.prototype.hasOwnProperty.call(PARTNERS, name)) throw new Error('この画面を使えない名前です: ' + name);
+  if (!Object.prototype.hasOwnProperty.call(partners_(), name)) throw new Error('この画面を使えない名前です: ' + name);
   return name;
 }
 
 function checkMonth_(name, ym) {
   ym = String(ym || '');
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) throw new Error('月の指定が正しくありません: ' + ym);
-  var from = PARTNERS[name].from;
+  var from = partners_()[name].from;
   if (from && ym < from) {
     throw new Error(Number(from.slice(5)) + '月分からこの画面で入力します。' + Number(ym.slice(5)) + '月分は前の画面で入力してください。');
   }
@@ -257,14 +296,14 @@ function init_(name) {
   var p = person_(name), homes = homesOf_(name), main = homes.length ? mainHome_(homes) : null;
   return {
     name: name,
-    fullName: p.fullName || PARTNERS[name].full || '',
+    fullName: p.fullName || partners_()[name].full || '',
     homeSet: homes.length > 0,
     homeMasked: main ? maskAddress_(main.address) : '',
     homes: homes.map(function (h) { return { id: h.id, label: h.label, masked: maskAddress_(h.address), main: h === main }; }),
     maxHomes: MAX_HOMES,
     places: placesOf_(name),
     rate: RATE_PER_KM,
-    from: PARTNERS[name].from || '',
+    from: partners_()[name].from || '',
     maxStops: MAX_STOPS
   };
 }
@@ -505,7 +544,7 @@ function buildPdfSheet_(name, ym) {
   if (!list.length) throw new Error(Number(ym.slice(5)) + '月の入力がまだありません。');
   var t = totals_(list);
   var p = person_(name);
-  var full = p.fullName || PARTNERS[name].full || name;
+  var full = p.fullName || partners_()[name].full || name;
   var sh = sheet_(SH.pdf);
   sh.clear();
   var W = 9;
@@ -638,7 +677,7 @@ function deleteAttachment_(name, id) {
 
 // ── Webアプリ ───────────────────────────────────────────
 function doGet() {
-  return json_({ ok: true, data: { status: 'ready', version: CODE_VERSION, partners: Object.keys(PARTNERS), time: new Date().toISOString() } });
+  return json_({ ok: true, data: { status: 'ready', version: CODE_VERSION, partners: Object.keys(partners_()), time: new Date().toISOString() } });
 }
 
 // 書き込まない操作（ロックをかけない）。previewRoute は距離メモに足すことはあるが、
