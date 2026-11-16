@@ -246,6 +246,15 @@
   @media (min-width: 1000px) {
     body.sg-two .isum button { display: none; }
   }
+
+  /* ═══ 新しいデザイン：カレンダーは社員のシフト入力と同じ箱の形（押せる日がひと目で分かる） ═══ */
+  .cal-grid { gap: 4px; }
+  .cal-day:not(.empty) { background: var(--sg-sunk); border: 1px solid var(--sg-hair); border-radius: 10px; }
+  .cal-day.on, .cal-day.start, .cal-day.end { background: var(--sg-primary); border-color: var(--sg-primary); }
+  .cal-day.in-range { background: var(--sg-blue-tint); border-color: transparent; }
+  .entry-total-v, .erow-main .a { font-family: var(--sg-num); font-weight: 700; }
+  .entry-total-v { font-size: 34px; }
+  .erow-main .a { font-size: 19px; }
 </style>
 </head>
 <body class="has-tabbar has-actionbar">
@@ -1417,10 +1426,10 @@
         var hw = e.highway === '有';
         var tolls = hw ? [Number(e.tollGo) || 0, Number(e.tollBack) || 0].filter(function(x) { return x; }).map(yenText).join('＋') : '';
         t = escapeHtml(e.place) + (hw ? '<span class="tag hw">高速</span>' : '') + (tolls ? '<small>高速代 ' + tolls + '</small>' : '');
-        acts = '<button type="button" data-act="edit">直す</button><button type="button" class="del" data-act="del">削除</button>';
+        acts = '<button type="button" data-act="edit">直す</button><button type="button" class="del" data-act="del">消す</button>';
       } else {
         t = escapeHtml(e.content) + '<span class="tag">イレギュラー</span>' + (e.note ? '<small>' + escapeHtml(e.note) + '</small>' : '');
-        acts = '<button type="button" class="del" data-act="del">削除</button><span class="note">内容を変えるときは、削除して入れ直してください</span>';
+        acts = '<button type="button" class="del" data-act="del">消す</button><span class="note">内容を変えるときは、消して入れ直してください</span>';
       }
       html += '<div class="erow" data-i="' + i + '"><button type="button" class="erow-main" aria-expanded="false"><span class="d">' + m + '/' + (e.day || '?') + '<small>' + dw + '</small></span>'
         + '<span class="t">' + t + '</span><span class="a">' + yenText(e.amount) + '</span><span class="chev" aria-hidden="true">' + (editable ? '›' : '') + '</span></button>'
