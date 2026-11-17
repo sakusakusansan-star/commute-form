@@ -298,4 +298,9 @@ assert.ok(t.ok, t.error);
 assert.deepStrictEqual([t.data.fullName, t.data.from], ['田中一郎', '']);
 assert.strictEqual(who('山口', { action: 'init' }).data.from, '2026-12', 'from は PARTNERS のまま');
 ['毛利', '佐藤', '福山', '鈴木'].forEach(n => assert.strictEqual(who(n, { action: 'init' }).ok, false, n + ' は使えない'));
+// checkRoster はログに出すだけ
+const logs = []; const oldLogger = global.Logger; global.Logger = { log: m => logs.push(String(m)) };
+checkRoster();
+global.Logger = oldLogger;
+assert.ok(logs[0].startsWith('名簿 5人：') && logs[0].includes('毛利（外した）') && logs[0].endsWith('この画面を使える人：山口・田中'), logs[0]);
 console.log('partner-commute: all tests passed');
