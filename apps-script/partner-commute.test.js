@@ -303,4 +303,24 @@ const logs = []; const oldLogger = global.Logger; global.Logger = { log: m => lo
 checkRoster();
 global.Logger = oldLogger;
 assert.ok(logs[0].startsWith('名簿 5人：') && logs[0].includes('毛利（外した）') && logs[0].endsWith('この画面を使える人：山口・田中'), logs[0]);
+// 前の画面（山口_稼働費計算_GAS版）から自宅と場所を写す。2回目は増えない
+{
+  const oldSh = Sheet('稼働場所');
+  [['短縮名', '住所'], ['田中自宅', '福岡県飯塚市枝国1-2-3'], ['au春日', '福岡県春日市星見ヶ丘3丁目'], ['イオン大牟田', '〒836-0037 福岡県大牟田市岬町3-4'], ['', '']].forEach(r => oldSh.appendRow(r));
+  const realOpen = SpreadsheetApp.openById;
+  SpreadsheetApp.openById = id => id === 'OLD' ? { getSheetByName: n => n === '稼働場所' ? oldSh : null } : realOpen(id);
+  const r1 = importOldPlaces_('田中', 'OLD');
+  assert.strictEqual(r1, '田中：自宅 1件・場所 2件を写しました', r1);
+  const me = doPost({ postData: { contents: JSON.stringify({ name: '田中', action: 'init' }) } });
+  assert.ok(me.ok, me.error);
+  assert.deepStrictEqual(me.data.homes.map(h => h.label + '|' + h.main), ['自宅|true']);
+  assert.deepStrictEqual(me.data.places.map(p => p.name), ['au春日', 'イオン大牟田']);
+  assert.strictEqual(sheets['場所']._g.find(r => r[2] === 'イオン大牟田')[3], '福岡県大牟田市岬町3-4', '〒は取る');
+  assert.strictEqual(sheets['人']._g.find(r => r[0] === '田中')[2], '福岡県飯塚市枝国1-2-3');
+  const r2 = importOldPlaces_('田中', 'OLD');
+  assert.ok(r2.startsWith('田中：自宅 0件・場所 0件') && r2.includes('au春日'), r2);
+  assert.strictEqual(sheets['場所']._g.filter(r => r[1] === '田中').length, 2);
+  assert.ok(importOldPlaces_('田中', 'NONE').includes('見つかりません'));
+  SpreadsheetApp.openById = realOpen;
+}
 console.log('partner-commute: all tests passed');

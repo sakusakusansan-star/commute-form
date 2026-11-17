@@ -27,7 +27,7 @@
 // ============================================================
 
 var SHEET_ID = '19TTixFCWjVUR9S4XvsMjdbQt_U3v4MlCdvVpgTMsK_U';   // パートナー_交通費（12月〜）
-var CODE_VERSION = '2026-11-17';
+var CODE_VERSION = '2026-11-18';
 var RATE_PER_KM = 15;
 
 // 名前 → { full: PDFに載せる氏名（本人が画面で登録すればそちらを使う）, from: この画面で入力できる最初の月 }
@@ -394,6 +394,43 @@ function syncPersonHome_(name) {
   var p = person_(name), main = mainHome_(homesOf_(name));
   if (p.row) sheet_(SH.people).getRange(p.row, 3).setValue(main ? main.address : '');
   else sheet_(SH.people).appendRow([name, '', main ? main.address : '', now_()]);
+}
+
+// ── 前の画面から写す（1回だけ。エディタで importOldPlaces を実行する） ─────────
+// 前の稼働費のブック（社員と同じ形）の「稼働場所」シートから、自宅と稼働場所を写す。
+// 「山口自宅」は自宅（いつも）に、ほかは場所に。もう同じ名前があるものは飛ばすので、何回実行しても増えない。
+// 前のブックは読むだけで、書き換えない。
+var OLD_BOOKS = { '山口': '1RRLf47jjFvL1MdFvkt43GdSsw_r7NLQOqOQzRCEwmpA' };   // 山口_稼働費計算_GAS版
+function importOldPlaces() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) { Logger.log('ほかの処理が動いています。少し待ってからもう一度実行してください'); return; }
+  try {
+    Object.keys(OLD_BOOKS).forEach(function (name) { Logger.log(importOldPlaces_(name, OLD_BOOKS[name])); });
+  } finally { lock.releaseLock(); }
+}
+function importOldPlaces_(name, bookId) {
+  var old = SpreadsheetApp.openById(bookId).getSheetByName('稼働場所');
+  if (!old || old.getLastRow() < 2) return name + '：前のブックに「稼働場所」シートが見つかりません（何もしていません）';
+  var rows = old.getRange(2, 1, old.getLastRow() - 1, 2).getValues();
+  var homeKey = name + '自宅', home = 0, places = 0, skipped = [];
+  rows.forEach(function (r) {
+    var short = String(r[0] || '').trim(), address = cleanAddress_(r[1]);
+    if (!short || !address) return;
+    if (short === homeKey) {
+      if (homesOf_(name).length) { skipped.push(short + '（自宅はもう登録してある）'); return; }
+      sheet_(SH.homes).appendRow([newId_(), name, '自宅', address, 'いつも', now_(), '']);
+      syncPersonHome_(name);
+      home++;
+      return;
+    }
+    var label = short.slice(0, 30);
+    if (label === '自宅' || homesOf_(name).some(function (h) { return h.label === label; }) ||
+        placesOf_(name).some(function (p) { return p.name === label; })) { skipped.push(short); return; }
+    sheet_(SH.places).appendRow([newId_(), name, label, address, now_(), '']);
+    places++;
+  });
+  return name + '：自宅 ' + home + '件・場所 ' + places + '件を写しました' +
+    (skipped.length ? '（もうあったので飛ばした：' + skipped.join('・') + '）' : '');
 }
 
 function savePlace_(name, id, placeName, address) {
