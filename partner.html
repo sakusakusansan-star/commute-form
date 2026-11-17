@@ -62,7 +62,7 @@
   .cal-day.on.filled::after { background: var(--sg-on-primary); }
   .cal-day.today:not(.on) { box-shadow: inset 0 0 0 1.5px var(--sg-hair); }
   .cal-legend { display: flex; justify-content: center; gap: 14px; margin-top: 8px; font-size: 11.5px; color: var(--sg-mute); }
-  .cal-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--sg-green); margin-right: 5px; vertical-align: 1px; }
+  .cal-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--sg-green-tint); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sg-green) 45%, transparent); margin-right: 5px; vertical-align: -1px; }
   .cal-legend b { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--sg-primary); margin-right: 5px; vertical-align: -1px; }
   .cal-day.miss { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sg-red) 55%, transparent); }
   .cal-day.miss.on { box-shadow: none; }
@@ -211,6 +211,12 @@
   .cal-day:not(.empty) { background: var(--sg-sunk); border: 1px solid var(--sg-hair); border-radius: 10px; }
   .cal-day.on, .cal-day.start, .cal-day.end { background: var(--sg-primary); border-color: var(--sg-primary); }
   .cal-day.in-range { background: var(--sg-blue-tint); border-color: transparent; }
+  /* 入れた日：薄い緑にして、その日の金額を小さく出す */
+  .cal-day.filled:not(.on) { background: var(--sg-green-tint); border-color: color-mix(in srgb, var(--sg-green) 35%, transparent); }
+  .cal-day.has-amt { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; line-height: 1.1; }
+  .cal-day.has-amt::after { display: none; }
+  .cal-day .cd-a { font-size: 9.5px; font-weight: 700; color: var(--sg-green); font-variant-numeric: tabular-nums; letter-spacing: -.02em; white-space: nowrap; }
+  .cal-day.on .cd-a { color: var(--sg-on-primary); opacity: .9; }
   .total .v, .entry .a { font-family: var(--sg-num); font-weight: 700; }
   .total .v { font-size: 36px; }
   .entry .a { font-size: 20px; }
@@ -251,7 +257,7 @@
 
       <div class="card">
         <div class="card-label"><svg class="sg-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6-5.6-6-10a6 6 0 0 1 12 0c0 4.4-6 10-6 10z"/><circle cx="12" cy="11" r="2.2"/></svg> 経路</div>
-        <p class="hint">いつもの日は行き先を1つ選ぶだけ。別の現場にも回った日は「経由地を追加」で足してください。</p>
+        <p class="hint">いつもの日は稼働場所を1つ選ぶだけ。別の現場にも回った日は「経由地を追加」で足してください。</p>
         <div class="route" id="route"></div>
       </div>
 
@@ -278,7 +284,7 @@
         </div>
       </div>
 
-      <div class="calc wait" id="calc">行き先を選ぶと、距離と金額がここに出ます。</div>
+      <div class="calc wait" id="calc">稼働場所を選ぶと、距離と金額がここに出ます。</div>
       <div class="msg" id="save-msg"></div>
     </section>
 
@@ -338,7 +344,7 @@
 <div class="sheet-bg" id="sheet" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
     <h2 id="sheet-title">場所を登録</h2>
-    <p class="hint">登録すると、この行き先に入ります。</p>
+    <p class="hint">登録すると、この稼働場所に入ります。</p>
     <div id="sheet-body"></div>
   </div>
 </div>
@@ -591,8 +597,7 @@
     var y = Number(ym.slice(0, 4)), m = Number(ym.slice(5)), sd = shifts[ym];
     var opts = function (sel) { return '<option value="">場所を選ぶ…</option>' + me.places.map(function (p) { return '<option value="' + esc(p.id) + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join(''); };
     el.innerHTML = '<h2>シフトからまとめて入れる<small>まだ ' + todo + '日</small></h2>'
-      + '<p>シフトの日で、まだ入れていない日です。自宅 → 場所 → 自宅 で入ります。高速・駐車場・経由地がある日は、チェックを外して下のカレンダーから入れてください。'
-      + (hdays.length ? '<br><b>ホテル泊</b>の日は自宅からの往復にならないので、チェックを外してあります。' : '') + '</p>'
+      + '<p>自宅との往復・高速なしで入ります。高速・駐車場・経由地がある日はチェックを外して、下から入れてください。</p>'
       + days.map(function (d) {
         var k = ym + ':' + d, ht = !!hd[d], p = fsPick[k], mp = p ? p.place : matchPlace(sd[d]), on = p ? p.on : (!!mp && !ht);
         return '<div class="fs-row' + (mp ? '' : ' nomatch') + (ht ? ' hotel' : '') + '"><input type="checkbox" data-d="' + d + '" aria-label="' + m + '月' + d + '日を入れる' + (ht ? '（ホテル泊）' : '') + '"' + (on ? ' checked' : '') + '>'
@@ -667,7 +672,9 @@
     for (var d = 1; d <= days; d++) {
       var w = new Date(y, m - 1, d).getDay(), cls = 'cal-day' + (w === 0 ? ' sun' : w === 6 ? ' sat' : '') + (f[d] ? ' filled' : '') + (picked[d] ? ' on' : '') + (miss[d] ? ' miss' : '')
         + (t.getFullYear() === y && t.getMonth() + 1 === m && t.getDate() === d ? ' today' : '');
-      html += '<button type="button" class="' + cls + '" data-d="' + d + '" aria-pressed="' + (picked[d] ? 'true' : 'false') + '" aria-label="' + m + '月' + d + '日' + (f[d] ? '（入力済み）' : miss[d] ? '（シフトの日・まだ）' : '') + '">' + d + '</button>';
+      var amt = f[d] ? Math.round(Number(f[d].total) || 0) : 0;
+      html += '<button type="button" class="' + cls + (amt ? ' has-amt' : '') + '" data-d="' + d + '" aria-pressed="' + (picked[d] ? 'true' : 'false') + '" aria-label="' + m + '月' + d + '日' + (f[d] ? '（入力済み' + (amt ? '・' + amt.toLocaleString() + '円' : '') + '）' : miss[d] ? '（シフトの日・まだ）' : '') + '">'
+        + (amt ? '<span class="cd-n">' + d + '</span><span class="cd-a">' + amt.toLocaleString() + '</span>' : d) + '</button>';
     }
     $('cal').innerHTML = html;
     $('legend-miss').hidden = !Object.keys(miss).length;
@@ -687,7 +694,7 @@
 
   // ── 経路 ──
   function placeOptions(sel) {
-    var html = '<option value="">行き先を選んでください</option>';
+    var html = '<option value="">稼働場所を選んでください</option>';
     me.places.forEach(function (p) { html += '<option value="' + esc(p.id) + '"' + (p.id === sel ? ' selected' : '') + '>' + esc(p.name) + '</option>'; });
     return html + '<option value="__new">＋ 新しい場所を登録…</option>';
   }
@@ -705,7 +712,7 @@
     if (endHome && !homeById(endHome)) endHome = '';
     var html = homeRow('start');
     stops.forEach(function (s, i) {
-      html += '<div class="stop"><span class="dot">' + (i + 1) + '</span><select data-i="' + i + '" aria-label="' + (i === 0 ? '行き先' : '経由地' + i) + '">' + placeOptions(s) + '</select>'
+      html += '<div class="stop"><span class="dot">' + (i + 1) + '</span><select data-i="' + i + '" aria-label="' + (i === 0 ? '稼働場所' : '経由地' + i) + '">' + placeOptions(s) + '</select>'
         + (i > 0 ? '<button type="button" class="rm" data-rm="' + i + '" aria-label="この経由地を外す">×</button>' : '') + '</div>';
     });
     if (stops.length < (me.maxStops || 10) - 2) html += '<button type="button" class="btn add-stop" id="add-stop">＋ 経由地を追加</button>';
@@ -810,7 +817,7 @@
     preview = null;
     clearTimeout(previewTimer);
     if (!me.homeSet) { drawCalc('先に「自宅と場所」で自宅を登録してください。', 'wait'); return; }
-    if (!stops.every(function (s) { return !!s; })) { drawCalc('行き先を選ぶと、距離と金額がここに出ます。', 'wait'); return; }
+    if (!stops.every(function (s) { return !!s; })) { drawCalc('稼働場所を選ぶと、距離と金額がここに出ます。', 'wait'); return; }
     if (!routeReady()) { drawCalc('同じ場所が続いています。経由地を選び直してください。', 'err'); return; }
     drawCalc('距離を計算しています…', 'wait');
     var seq = ++previewSeq, st = routeStops(), hw = highway;
@@ -827,7 +834,7 @@
     if (text) { el.className = 'calc ' + kind; el.textContent = text; updateSaveButton(); return; }
     if (!preview) return;
     var toll = highway ? amount('toll') || 0 : 0, park = amount('parking') || 0;
-    var n = Object.keys(picked).length, day = preview.gas + toll + park;
+    var n = Object.keys(picked).length, day = dayTotal();
     var html = preview.legs.map(function (l) { return '<div class="leg"><span>' + esc(l.from) + ' → ' + esc(l.to) + '</span><span>' + km(l.km) + '</span></div>'; }).join('');
     html += '<div class="sum"><span>' + km(preview.km) + ' × ' + (me.rate || 15) + '円</span><span>' + yen(preview.gas) + '</span></div>';
     if (toll) html += '<div class="leg"><span>高速代</span><span>' + yen(toll) + '</span></div>';
@@ -837,6 +844,9 @@
     updateSaveButton();
   }
 
+  // 選んでいる1日あたりの金額（ガソリン代＋高速代＋駐車場代）。距離を出す前は 0
+  function dayTotal() { return preview ? preview.gas + (highway ? amount('toll') || 0 : 0) + (amount('parking') || 0) : 0; }
+
   function updateSaveButton() {
     var n = Object.keys(picked).length, b = $('btn-save');
     var tooMany = rcQueue.length > 0 && n > 1;
@@ -844,8 +854,8 @@
     b.disabled = !ok;
     // 押せないあいだは、ボタンの文字を「あと何をすればいいか」にする（sieg-nav.js が細い案内の1行に替える）
     b.textContent = saving ? '送信中…' : tooMany ? '領収書があるときは1日ずつ送ってください'
-      : !n ? '日付を選ぶと送信できます' : !routeReady() ? '行き先を選んでください' : !amountsOk() ? '金額を確かめてください' : !preview ? '距離を計算中…' : !initFresh ? '最新を確認中…'
-      : n + '日分を送信する' + (rcQueue.length ? '（領収書' + rcQueue.length + '枚）' : '');
+      : !n ? '日付を選ぶと送信できます' : !routeReady() ? '稼働場所を選んでください' : !amountsOk() ? '金額を確かめてください' : !preview ? '距離を計算中…' : !initFresh ? '最新を確認中…'
+      : n + '日分を送信する・' + yen(dayTotal() * n) + (rcQueue.length ? '（領収書' + rcQueue.length + '枚）' : '');
   }
 
   $('btn-save').onclick = function () {
@@ -901,7 +911,7 @@
     $('etc-list').innerHTML = files.filter(function (f) { return f.kind === 'ETC'; }).map(fileLi).join('');
     var orphans = files.filter(function (f) { return f.date && !dates[f.date]; });
     var orphanHtml = orphans.length ? '<div class="orphans"><div class="t">入力を消した日の領収書</div><ul class="rc-mini">' + orphans.map(function (f) { return miniLi(f, true); }).join('') + '</ul></div>' : '';
-    if (!month.entries.length) { $('entries').innerHTML = SiegNav.empty('まだ入力がありません', '「入力」で日付と行き先を選んで送ると、ここに並びます') + orphanHtml; return; }
+    if (!month.entries.length) { $('entries').innerHTML = SiegNav.empty('まだ入力がありません', '「入力」で日付と稼働場所を選んで送ると、ここに並びます') + orphanHtml; return; }
     $('entries').innerHTML = month.entries.map(function (e) {
       var rc = byDate[e.date] || [];
       var extra = [km(e.km) + (e.highway ? '（高速）' : ''), 'ガソリン代 ' + yen(e.gas)];

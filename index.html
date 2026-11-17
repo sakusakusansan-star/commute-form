@@ -107,7 +107,7 @@
   .btn-submit:disabled { opacity: .5; transform: none; filter: none; }
   .req { font-size: 10px; font-weight: 800; color: var(--sg-red); background: var(--sg-red-tint); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   .cal-legend { display: flex; justify-content: center; gap: 14px; margin-top: 6px; font-size: 11.5px; color: var(--sg-mute); }
-  .cal-legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--sg-green); margin-right: 5px; vertical-align: 1px; }
+  .cal-legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--sg-green-tint); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sg-green) 45%, transparent); margin-right: 5px; vertical-align: -1px; }
   .cal-legend b { display: inline-block; width: 11px; height: 11px; border-radius: 3px; background: var(--sg-primary); margin-right: 5px; vertical-align: -1px; }
   .cal-grid.loading { opacity: .4; pointer-events: none; }
   .cal-today { background: var(--sg-sunk); border: none; border-radius: 999px; padding: 8px 14px; min-height: 36px; font-size: 12px; font-weight: 700; color: var(--sg-blue); }
@@ -207,6 +207,12 @@
   .fs-msg { font-size: 13px; margin-top: 8px; }
   .cal-day.miss { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sg-red) 55%, transparent); }
   .cal-day.miss.on { box-shadow: none; }
+  /* 入れた日：薄い緑にして、その日の金額を小さく出す */
+  .cal-day.has-amt { flex-direction: column; gap: 1px; line-height: 1.1; }
+  .cal-day.has-amt::after { display: none; }
+  .cal-day .cd-a { font-size: 9.5px; font-weight: 700; color: var(--sg-green); font-variant-numeric: tabular-nums; letter-spacing: -.02em; white-space: nowrap; pointer-events: none; }
+  .cal-day .cd-n { pointer-events: none; }
+  .cal-day.on .cd-a { color: var(--sg-on-primary); opacity: .9; }
   .cal-legend u { display: inline-block; width: 11px; height: 11px; border-radius: 3px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sg-red) 55%, transparent); margin-right: 5px; vertical-align: -1px; text-decoration: none; }
   /* ───────── 一覧：1日1行（押すと 直す・削除）・前の月（履歴）を見る ───────── */
   .mbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
@@ -252,6 +258,7 @@
   .cal-day:not(.empty) { background: var(--sg-sunk); border: 1px solid var(--sg-hair); border-radius: 10px; }
   .cal-day.on, .cal-day.start, .cal-day.end { background: var(--sg-primary); border-color: var(--sg-primary); }
   .cal-day.in-range { background: var(--sg-blue-tint); border-color: transparent; }
+  .cal-day.filled:not(.on):not(.start):not(.end):not(.in-range) { background: var(--sg-green-tint); border-color: color-mix(in srgb, var(--sg-green) 35%, transparent); }
   .entry-total-v, .erow-main .a { font-family: var(--sg-num); font-weight: 700; }
   .entry-total-v { font-size: 34px; }
   .erow-main .a { font-size: 19px; }
@@ -333,8 +340,8 @@
       <div class="card">
         <div class="card-label">高速利用</div>
         <div class="hw-toggle">
-          <button class="hw-btn active" id="hw-none" onclick="setHighway('無')">無</button>
-          <button class="hw-btn" id="hw-yes" onclick="setHighway('有')">有</button>
+          <button class="hw-btn active" id="hw-none" onclick="setHighway('無')">高速なし</button>
+          <button class="hw-btn" id="hw-yes" onclick="setHighway('有')">高速を使った</button>
         </div>
         <div class="toll-fields" id="toll-fields">
           <div>
@@ -964,7 +971,8 @@
     var b = document.getElementById(normal ? 'btn-submit-normal' : 'btn-submit-irreg');
     // 前回の内容を出しているあいだ（最新を読み終えるまで）は、選べるが送れない
     var wait = n && !initFresh;
-    if (!sendingNow) { b.disabled = !n || wait; b.textContent = wait ? '最新を確認中…' : normal && n > 1 ? n + '日分を送信する' : '送信する'; }
+    var est = normal && n ? estimateDay() : 0;
+    if (!sendingNow) { b.disabled = !n || wait; b.textContent = wait ? '最新を確認中…' : (normal && n > 1 ? n + '日分を送信する' : '送信する') + (est ? '・約' + yenText(est * n) : ''); }
     document.getElementById('action-hint').textContent = n ? '' : '日付を選ぶと送信できます';
   }
 
@@ -1042,7 +1050,34 @@
     } else {
       parts.push('高速なし');
     }
+    var est = days.length ? estimateDay() : 0;
+    if (est) parts.push('約' + yenText(est * days.length) + (days.length > 1 ? '（1日 約' + yenText(est) + '）' : ''));
     el.textContent = '送る内容：' + parts.join(' ／ ');
+    syncSubmit();
+  }
+
+  // 1日の金額の見込み：同じ場所で前に入れた日の金額（高速代をのぞく）＋いま入れている高速代。
+  // 距離はGoogle側で出すので、まだ一度も入れていない場所は出さない（0）
+  function placeBases() {
+    var key = 'sgCommuteBase:' + (currentStaff || ''), map = {};
+    try { map = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { map = {}; }
+    if (mine) {
+      var changed = false;
+      mine.forEach(function(e) {
+        if (e.type !== 'normal' || !e.place) return;
+        var base = (Number(e.amount) || 0) - (e.highway === '有' ? (Number(e.tollGo) || 0) + (Number(e.tollBack) || 0) : 0);
+        if (base > 0 && map[e.place] !== base) { map[e.place] = base; changed = true; }
+      });
+      if (changed) { try { localStorage.setItem(key, JSON.stringify(map)); } catch (e) {} }
+    }
+    return map;
+  }
+  function estimateDay() {
+    if (!selectedPlace) return 0;
+    var base = placeBases()[selectedPlace];
+    if (!base) return 0;
+    var toll = selectedHighway === '有' ? (Number(document.getElementById('toll-go').value) || 0) + (Number(document.getElementById('toll-back').value) || 0) : 0;
+    return Math.round(base + toll);
   }
 
   // 今日を選ぶ（もう選んであれば外す）
@@ -1091,6 +1126,8 @@
     var offset = (firstWd === 0) ? 6 : firstWd - 1;
     var daysInMonth = new Date(calYear, calMonth, 0).getDate();
     var missSet = {}, miss = missDays(false);   // シフトの日で、まだ入れていない日（きのうまで）
+    var dayAmounts = {};   // 入れた日の金額（シートの月の入力が読めていれば）
+    if (mine && monthInfo && calYear === monthInfo.year && calMonth === monthInfo.month) mine.forEach(function(e) { if (e.day) dayAmounts[e.day] = (dayAmounts[e.day] || 0) + (Number(e.amount) || 0); });
     miss.forEach(function(x) { missSet[x] = true; });
     document.getElementById('legend-miss').hidden = !miss.length;
 
@@ -1102,8 +1139,11 @@
     for (var d = 1; d <= daysInMonth; d++) {
       var wd = new Date(calYear, calMonth - 1, d).getDay();
       var div = document.createElement('div');
-      div.textContent = d;
-      div.className = 'cal-day' + (missSet[d] ? ' miss' : '');
+      var amt = dayAmounts[d] ? Math.round(dayAmounts[d]) : 0;
+      if (amt) div.innerHTML = '<span class="cd-n">' + d + '</span><span class="cd-a">' + amt.toLocaleString() + '</span>';
+      else div.textContent = d;
+      div.className = 'cal-day' + (missSet[d] ? ' miss' : '') + (amt ? ' has-amt' : '');
+      if (amt) div.setAttribute('aria-label', calMonth + '月' + d + '日（入力済み・' + amt.toLocaleString() + '円）');
       if (missSet[d]) div.setAttribute('aria-label', calMonth + '月' + d + '日（シフトの日・まだ入力していません）');
       div.setAttribute('data-day', d);
       if (wd === 6) div.classList.add('sat');
@@ -1470,7 +1510,7 @@
     if (e.place && list.indexOf(e.place) < 0) list.unshift(e.place);
     var hw = e.highway === '有';
     edit.innerHTML = '<div><label class="field-label">稼働場所</label><select class="ee-place">' + list.map(function(p) { return '<option' + (p === e.place ? ' selected' : '') + '>' + escapeHtml(p) + '</option>'; }).join('') + '</select></div>'
-      + '<div><label class="field-label">高速利用</label><div class="seg2"><button type="button" data-hw="無"' + (hw ? '' : ' class="on"') + '>無</button><button type="button" data-hw="有"' + (hw ? ' class="on"' : '') + '>有</button></div></div>'
+      + '<div><label class="field-label">高速利用</label><div class="seg2"><button type="button" data-hw="無"' + (hw ? '' : ' class="on"') + '>高速なし</button><button type="button" data-hw="有"' + (hw ? ' class="on"' : '') + '>高速を使った</button></div></div>'
       + '<div class="two ee-tolls"' + (hw ? '' : ' hidden') + '><div><label class="field-label">高速代（行き）</label><input type="number" class="ee-go" inputmode="numeric" placeholder="円" value="' + (Number(e.tollGo) || '') + '"></div>'
       + '<div><label class="field-label">高速代（帰り）</label><input type="number" class="ee-back" inputmode="numeric" placeholder="円" value="' + (Number(e.tollBack) || '') + '"></div></div>'
       + '<div class="emsg" role="status"></div><div class="acts"><button type="button" class="cancel ee-cancel">やめる</button><button type="button" class="save ee-save">保存する</button></div>';
@@ -1522,6 +1562,7 @@
       mine = list || [];
       if (ymNow) SiegNav.cacheSet(cacheKey('mine'), { ym: ymNow, list: mine });
       renderSummary(); renderFromShift();
+      if (calYear) renderCal();   // カレンダーに、入れた日の金額を出す
     })
       .catch(function() { mine = null; renderSummary(); renderFromShift(); });
   }
@@ -1600,8 +1641,7 @@
     var y = monthInfo.year, m = monthInfo.month;
     var opts = function(sel) { return '<option value="">場所を選ぶ…</option>' + placeList.map(function(p) { return '<option' + (p === sel ? ' selected' : '') + '>' + escapeHtml(p) + '</option>'; }).join(''); };
     el.innerHTML = '<h2>シフトからまとめて入れる<small>まだ ' + todo + '日</small></h2>'
-      + '<p>シフトの日で、まだ入れていない日です。場所を確かめて送ってください。高速を使った日は、チェックを外して下のカレンダーから入れてください。'
-      + (hdays.length ? '<br><b>ホテル泊</b>の日は自宅からの往復にならないので、チェックを外してあります。' : '') + '</p>'
+      + '<p>高速なしで入ります。高速を使った日はチェックを外して、下から入れてください。</p>'
       + days.map(function(d) {
         var sp = shiftDays[d], ht = !!shiftHotel[d], f = fsPick[d], mp = f ? f.place : matchPlace(sp), on = f ? f.on : (!!mp && !ht);
         return '<div class="fs-row' + (mp ? '' : ' nomatch') + (ht ? ' hotel' : '') + '"><input type="checkbox" data-d="' + d + '" aria-label="' + m + '月' + d + '日を入れる' + (ht ? '（ホテル泊）' : '') + '"' + (on ? ' checked' : '') + '>'
