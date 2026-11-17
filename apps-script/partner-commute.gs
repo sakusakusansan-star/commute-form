@@ -74,6 +74,11 @@ function partners_() {
   });
   return out;
 }
+// 最初に一度エディタで実行して、日報のスプレッドシート（名簿）を読む権限を許可する。何も書き換えない
+function checkRoster() {
+  var r = roster_();
+  Logger.log(r ? '名簿 ' + r.length + '人：' + r.map(function(p) { return p.name + (p.hidden ? '（外した）' : ''); }).join('・') + ' / この画面を使える人：' + Object.keys(partners_()).join('・') : '名簿シートが読めません（まだ無いか、権限がありません）');
+}
 
 var PDF_FOLDER_ID = '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K';   // 経費精算/パートナー
 var MAX_HOMES = 3;           // 自宅は3か所まで（実家とアパートなど）
