@@ -1,9 +1,10 @@
 // ============================================================
-//  パートナー交通費（稼働費）— Google Apps Script（Webアプリ）
+//  稼働費（社員・パートナー）— Google Apps Script（Webアプリ）
 //
-//  パートナー（山口・鈴木・毛利・山内）が、稼働費入力の画面
-//  （commute-form/partner.html）から使う。社員（福山・古川・清田）は
-//  これまでどおり commute-expense-sheet.gs のほう。
+//  名簿で「稼働費」に印のある人（社員もパートナーも）が、稼働費入力の画面
+//  （commute-form/partner.html）から使う。社員（福山・古川・清田）と山口さんは 2026年12月分から。
+//  11月分までは前の画面（commute-expense-sheet.gs のブック）のまま。
+//  PDFは社員なら「経費精算/社員」、パートナーなら「経費精算/パートナー」に保存する。
 //
 //  ・自宅と稼働場所は、本人が画面から住所で登録する（Googleマップで場所を確かめる）
 //  ・1日の経路は「自宅 → 場所 → 自宅」。イレギュラーの日は経由地を足して
@@ -27,7 +28,7 @@
 // ============================================================
 
 var SHEET_ID = '19TTixFCWjVUR9S4XvsMjdbQt_U3v4MlCdvVpgTMsK_U';   // パートナー_交通費（12月〜）
-var CODE_VERSION = '2026-11-18';
+var CODE_VERSION = '2026-11-19';
 var RATE_PER_KM = 15;
 
 // 名前 → { full: PDFに載せる氏名（本人が画面で登録すればそちらを使う）, from: この画面で入力できる最初の月 }
@@ -37,6 +38,12 @@ var PARTNERS = {
   '鈴木': {},
   '毛利': {},
   '山内': {}
+};
+// 社員も12月分からこの画面（11月分までは「稼働費計算_GAS版」）。名簿が読めないときはこの3人
+var STAFF = {
+  '福山': { full: '福山康平', from: '2026-12' },
+  '古川': { full: '古川泰成', from: '2026-12' },
+  '清田': { full: '清田和男', from: '2026-12' }
 };
 var ROSTER_BOOK_ID = '1ffkmHDt_sz1ZQ3ZB_fXIaJeFhuW0wSI7bqwMpC9Z33g';   // 日報のスプレッドシート（「名簿」シート）
 
@@ -62,25 +69,35 @@ function roster_() {
   try { if (cache) cache.put('roster:v1', JSON.stringify(list), 120); } catch (e) {}
   return list;
 }
-// この画面を使える人 → { full, from }
-function partners_() {
-  var r = roster_();
-  if (!r) return PARTNERS;
-  var out = {};
+// この画面を使える人 → { full, from, group }。名簿の「稼働費」に印のある人（外した人をのぞく）。社員もパートナーも
+// from（この画面で入力できる最初の月）は PARTNERS・STAFF から。名簿にだけいる新しい人は from なし（すぐ使える）
+function users_() {
+  var r = roster_(), out = {};
+  function base(n) {
+    return Object.prototype.hasOwnProperty.call(PARTNERS, n) ? PARTNERS[n] : Object.prototype.hasOwnProperty.call(STAFF, n) ? STAFF[n] : {};
+  }
+  if (!r) {
+    Object.keys(PARTNERS).forEach(function (n) { out[n] = { full: PARTNERS[n].full || '', from: PARTNERS[n].from || '', group: 'partner' }; });
+    Object.keys(STAFF).forEach(function (n) { out[n] = { full: STAFF[n].full || '', from: STAFF[n].from || '', group: 'staff' }; });
+    return out;
+  }
   r.forEach(function(p) {
-    if (p.group !== 'partner' || p.hidden || p.tools.indexOf('commute') < 0) return;
-    var base = Object.prototype.hasOwnProperty.call(PARTNERS, p.name) ? PARTNERS[p.name] : {};
-    out[p.name] = { full: p.full || base.full || '', from: base.from || '' };
+    if (p.hidden || p.tools.indexOf('commute') < 0) return;
+    var b = base(p.name);
+    out[p.name] = { full: p.full || b.full || '', from: b.from || '', group: p.group };
   });
   return out;
 }
+// 以前の呼び名（パートナーだけの画面だったころ）
+function partners_() { return users_(); }
 // 最初に一度エディタで実行して、日報のスプレッドシート（名簿）を読む権限を許可する。何も書き換えない
 function checkRoster() {
   var r = roster_();
-  Logger.log(r ? '名簿 ' + r.length + '人：' + r.map(function(p) { return p.name + (p.hidden ? '（外した）' : ''); }).join('・') + ' / この画面を使える人：' + Object.keys(partners_()).join('・') : '名簿シートが読めません（まだ無いか、権限がありません）');
+  Logger.log(r ? '名簿 ' + r.length + '人：' + r.map(function(p) { return p.name + (p.hidden ? '（外した）' : ''); }).join('・') + ' / この画面を使える人：' + Object.keys(users_()).join('・') : '名簿シートが読めません（まだ無いか、権限がありません）');
 }
 
 var PDF_FOLDER_ID = '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K';   // 経費精算/パートナー
+var STAFF_PDF_FOLDER_ID = '1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o';   // 経費精算/社員
 var MAX_HOMES = 3;           // 自宅は3か所まで（実家とアパートなど）
 var MAX_STOPS = 10;          // 1日の経路に入れられる地点の数（自宅を含む）
 var MAX_AMOUNT = 100000;     // 高速代・駐車場代の1日の上限（打ち間違い防止）
@@ -133,14 +150,14 @@ function dateText_(v) {
 // ── 人・月の確かめ ──────────────────────────────────────
 function checkName_(name) {
   name = String(name || '');
-  if (!Object.prototype.hasOwnProperty.call(partners_(), name)) throw new Error('この画面を使えない名前です: ' + name);
+  if (!Object.prototype.hasOwnProperty.call(users_(), name)) throw new Error('この画面を使えない名前です: ' + name);
   return name;
 }
 
 function checkMonth_(name, ym) {
   ym = String(ym || '');
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(ym)) throw new Error('月の指定が正しくありません: ' + ym);
-  var from = partners_()[name].from;
+  var from = users_()[name].from;
   if (from && ym < from) {
     throw new Error(Number(from.slice(5)) + '月分からこの画面で入力します。' + Number(ym.slice(5)) + '月分は前の画面で入力してください。');
   }
@@ -301,14 +318,15 @@ function init_(name) {
   var p = person_(name), homes = homesOf_(name), main = homes.length ? mainHome_(homes) : null;
   return {
     name: name,
-    fullName: p.fullName || partners_()[name].full || '',
+    fullName: p.fullName || users_()[name].full || '',
     homeSet: homes.length > 0,
     homeMasked: main ? maskAddress_(main.address) : '',
     homes: homes.map(function (h) { return { id: h.id, label: h.label, masked: maskAddress_(h.address), main: h === main }; }),
     maxHomes: MAX_HOMES,
     places: placesOf_(name),
     rate: RATE_PER_KM,
-    from: partners_()[name].from || '',
+    from: users_()[name].from || '',
+    group: users_()[name].group || 'partner',
     maxStops: MAX_STOPS
   };
 }
@@ -397,10 +415,17 @@ function syncPersonHome_(name) {
 }
 
 // ── 前の画面から写す（1回だけ。エディタで importOldPlaces を実行する） ─────────
-// 前の稼働費のブック（社員と同じ形）の「稼働場所」シートから、自宅と稼働場所を写す。
-// 「山口自宅」は自宅（いつも）に、ほかは場所に。もう同じ名前があるものは飛ばすので、何回実行しても増えない。
+// 前の稼働費のブックの「稼働場所」シートから、自宅と稼働場所を写す。
+// 「山口自宅」などは自宅（いつも）に、ほかは場所に。もう同じ名前があるものは飛ばすので、何回実行しても増えない。
+// 社員のブックは全員の場所が1枚に入っているので、その人がシートか履歴で使ったことのある場所だけを写す。
 // 前のブックは読むだけで、書き換えない。
-var OLD_BOOKS = { '山口': '1RRLf47jjFvL1MdFvkt43GdSsw_r7NLQOqOQzRCEwmpA' };   // 山口_稼働費計算_GAS版
+var OLD_MAIN_BOOK = '1shpJvauT5rwKCaWH9RQBNZt3DzAA11yD5jNFUg2c6d4';   // 稼働費計算_GAS版（福山・古川・清田）
+var OLD_BOOKS = {
+  '山口': { id: '1RRLf47jjFvL1MdFvkt43GdSsw_r7NLQOqOQzRCEwmpA', all: true },   // 山口_稼働費計算_GAS版（山口さんだけ）
+  '福山': { id: OLD_MAIN_BOOK, sheet: '福山康平' },
+  '古川': { id: OLD_MAIN_BOOK, sheet: '古川泰成' },
+  '清田': { id: OLD_MAIN_BOOK, sheet: '清田和男' }
+};
 function importOldPlaces() {
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(20000)) { Logger.log('ほかの処理が動いています。少し待ってからもう一度実行してください'); return; }
@@ -408,14 +433,17 @@ function importOldPlaces() {
     Object.keys(OLD_BOOKS).forEach(function (name) { Logger.log(importOldPlaces_(name, OLD_BOOKS[name])); });
   } finally { lock.releaseLock(); }
 }
-function importOldPlaces_(name, bookId) {
-  var old = SpreadsheetApp.openById(bookId).getSheetByName('稼働場所');
+function importOldPlaces_(name, src) {
+  if (typeof src === 'string') src = { id: src, all: true };
+  var book = SpreadsheetApp.openById(src.id), old = book.getSheetByName('稼働場所');
   if (!old || old.getLastRow() < 2) return name + '：前のブックに「稼働場所」シートが見つかりません（何もしていません）';
   var rows = old.getRange(2, 1, old.getLastRow() - 1, 2).getValues();
-  var homeKey = name + '自宅', home = 0, places = 0, skipped = [];
+  var homeKey = name + '自宅', home = 0, places = 0, skipped = [], used = src.all ? null : usedPlaces_(book, src.sheet);
+  if (used && !Object.keys(used).length) return name + '：前のブックで使った場所が見つかりません（「' + src.sheet + '」シートと履歴を確かめてください）';
   rows.forEach(function (r) {
     var short = String(r[0] || '').trim(), address = cleanAddress_(r[1]);
     if (!short || !address) return;
+    if (used && short !== homeKey && !used[short]) return;
     if (short === homeKey) {
       if (homesOf_(name).length) { skipped.push(short + '（自宅はもう登録してある）'); return; }
       sheet_(SH.homes).appendRow([newId_(), name, '自宅', address, 'いつも', now_(), '']);
@@ -429,8 +457,18 @@ function importOldPlaces_(name, bookId) {
     sheet_(SH.places).appendRow([newId_(), name, label, address, now_(), '']);
     places++;
   });
-  return name + '：自宅 ' + home + '件・場所 ' + places + '件を写しました' +
+  return name + '：自宅 ' + home + '件・場所 ' + places + '件を写しました' + (used && !home && !homesOf_(name).length ? '（自宅が見つかりませんでした。画面の「自宅と場所」で登録してください）' : '') +
     (skipped.length ? '（もうあったので飛ばした：' + skipped.join('・') + '）' : '');
+}
+
+// その人がシート（今の月）と「稼働費履歴」で入れたことのある場所の名前 → true
+function usedPlaces_(book, sheetName) {
+  var out = {}, sh = book.getSheetByName(sheetName), hist = book.getSheetByName('稼働費履歴');
+  if (sh && sh.getLastRow() > 0) sh.getRange(1, 3, sh.getLastRow(), 1).getValues().forEach(function (r) { var v = String(r[0] || '').trim(); if (v) out[v] = true; });
+  if (hist && hist.getLastRow() > 1) hist.getRange(2, 1, hist.getLastRow() - 1, 5).getValues().forEach(function (r) {
+    if (String(r[1]).trim() === sheetName && String(r[2]).trim() === '通常' && String(r[4] || '').trim()) out[String(r[4]).trim()] = true;
+  });
+  return out;
 }
 
 function savePlace_(name, id, placeName, address) {
@@ -566,13 +604,13 @@ function summary_(name, ym) {
 function pdfName_(name, ym, kind) { return ym + '_' + name + '_' + kind + '.pdf'; }
 
 function monthFolder_(name, ym) {
-  var root;
+  var root, staff = (users_()[name] || {}).group === 'staff';
   try {
-    root = DriveApp.getFolderById(PDF_FOLDER_ID);
+    root = DriveApp.getFolderById(staff ? STAFF_PDF_FOLDER_ID : PDF_FOLDER_ID);
   } catch (err) {
-    throw new Error('PDFの保存先（パートナー）フォルダにアクセスできません。スクリプトを実行するアカウントに編集権限があるか確認してください。');
+    throw new Error('PDFの保存先（' + (staff ? '社員' : 'パートナー') + '）フォルダにアクセスできません。スクリプトを実行するアカウントに編集権限があるか確認してください。');
   }
-  // パートナー → 人 → 年 → 月
+  // 社員／パートナー → 人 → 年 → 月
   return folder_(folder_(folder_(root, name), ym.slice(0, 4) + '年'), Number(ym.slice(5)) + '月');
 }
 
@@ -586,7 +624,7 @@ function buildPdfSheet_(name, ym) {
   if (!list.length) throw new Error(Number(ym.slice(5)) + '月の入力がまだありません。');
   var t = totals_(list);
   var p = person_(name);
-  var full = p.fullName || partners_()[name].full || name;
+  var full = p.fullName || users_()[name].full || name;
   var sh = sheet_(SH.pdf);
   sh.clear();
   var W = 9;
@@ -719,7 +757,9 @@ function deleteAttachment_(name, id) {
 
 // ── Webアプリ ───────────────────────────────────────────
 function doGet() {
-  return json_({ ok: true, data: { status: 'ready', version: CODE_VERSION, partners: Object.keys(partners_()), time: new Date().toISOString() } });
+  var u = users_();
+  return json_({ ok: true, data: { status: 'ready', version: CODE_VERSION, users: Object.keys(u),
+    partners: Object.keys(u).filter(function (n) { return u[n].group !== 'staff'; }), time: new Date().toISOString() } });
 }
 
 // 書き込まない操作（ロックをかけない）。previewRoute は距離メモに足すことはあるが、

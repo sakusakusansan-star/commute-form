@@ -848,17 +848,18 @@
     });
   }
 
-  // パートナー様は partner.html（自宅・場所を自分で登録する新しい画面）へ。
-  // 山口さんだけは 12月分から切り替え（11月分までは、この画面のシートに入っている）。
-  // 前の月の入力・PDFのために ?old=1 を付けて開いたときは、この画面のまま。
+  // 稼働費は partner.html（自宅・場所を自分で登録する新しい画面）へ。社員もパートナーも同じ画面。
+  // 社員と山口さんは 12月分から切り替え（11月分までは、この画面のシートに入っている）。
+  // 前の月の入力・PDFのために ?old=1 を付けて開いたときは、この画面のまま（anyway を付けると、それでも行き先を返す）。
   var PARTNER_NEW_FROM = { '山口': '2026-12' };
-  function partnerPageFor(name) {
+  var STAFF_NEW_FROM = '2026-12';
+  function partnerPageFor(name, anyway) {
     var R = window.SiegRoster;
-    if (!R || !R.partners || new URLSearchParams(location.search).get('old') === '1') return '';
-    var n = normName(name), short = '';
-    R.partners.forEach(function(p) { if (normName(p) === n || (R.fullName(p) && normName(R.fullName(p)) === n)) short = p; });
+    if (!R || !R.partners || (!anyway && new URLSearchParams(location.search).get('old') === '1')) return '';
+    var n = normName(name), short = '', list = R.forTool ? R.forTool('commute') : R.partners;
+    list.forEach(function(p) { if (normName(p) === n || (R.fullName(p) && normName(R.fullName(p)) === n)) short = p; });
     if (!short) return '';
-    var from = PARTNER_NEW_FROM[short];
+    var from = R.isPartner && R.isPartner(short) ? PARTNER_NEW_FROM[short] : STAFF_NEW_FROM;
     if (from) {
       var d = new Date(), ym = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
       if (!R.commutePartnerApi || ym < from) return '';
@@ -1714,7 +1715,23 @@
     var t = new Date(), nk = ymKey(t.getFullYear(), t.getMonth() + 1), sk = sheetYm();
     if (sk >= nk) { el.hidden = true; el.innerHTML = ''; return; }
     var saved = false; try { saved = !!localStorage.getItem(pdfSavedKey()); } catch (e) {}
-    var nm = t.getMonth() + 1, om = monthInfo.month;
+    var nm = t.getMonth() + 1, om = monthInfo.month, moved = partnerPageFor(currentStaff, true);
+    if (moved) {   // 12月分からは新しい画面：この画面では前の月のPDFだけ
+      var saved2 = false; try { saved2 = !!localStorage.getItem(pdfSavedKey()); } catch (e) {}
+      el.innerHTML = '<h2>' + om + '月分を締めましょう</h2><p>' + nm + '月分からは新しい画面で入力します。この画面では ' + om + '月分のPDFを保存してください。</p>'
+        + '<div class="step' + (saved2 ? ' done' : '') + '"><span class="no">' + (saved2 ? '✓' : '1') + '</span><b>' + om + '月分のPDFを保存<small>' + (saved2 ? '保存しました' : 'ETCの明細がある月は「設定」の PDF保存 から一緒に保存できます') + '</small></b><button type="button" id="mg-pdf">' + (saved2 ? 'もう一度' : '保存する') + '</button></div>'
+        + '<div class="step"><span class="no">2</span><b>' + nm + '月分を入れる<small>新しい画面（自宅と場所を登録して入れる）</small></b><button type="button" id="mg-new">開く</button></div>'
+        + '<div class="msg2" id="mg-msg" role="status"></div>';
+      el.hidden = false;
+      document.getElementById('mg-new').onclick = function() { location.href = moved; };
+      document.getElementById('mg-pdf').onclick = function() {
+        var b = this, m2 = document.getElementById('mg-msg');
+        b.disabled = true; m2.textContent = om + '月分のPDFを保存中…';
+        callApi('exportPdf', { staffName: currentStaff }, 60000).then(function() { markPdfSaved(); document.getElementById('mg-msg').textContent = '✅ ' + om + '月分のPDFを保存しました'; })
+          .catch(function(err) { b.disabled = false; m2.textContent = '❌ 保存できませんでした：' + err.message; });
+      };
+      return;
+    }
     el.innerHTML = '<h2>' + nm + '月になりました</h2><p>' + om + '月分を締めて、' + nm + '月を始めましょう。' + om + '月分は履歴に残ります（あとからも見られます）。</p>'
       + '<div class="step' + (saved ? ' done' : '') + '"><span class="no">' + (saved ? '✓' : '1') + '</span><b>' + om + '月分のPDFを保存<small>' + (saved ? '保存しました' : 'ETCの明細がある月は「設定」の PDF保存 から一緒に保存できます') + '</small></b><button type="button" id="mg-pdf">' + (saved ? 'もう一度' : '保存する') + '</button></div>'
       + '<div class="step"><span class="no">2</span><b>' + nm + '月を始める<small>カレンダーが' + nm + '月になります</small></b><button type="button" id="mg-start">始める</button></div>'

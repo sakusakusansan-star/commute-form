@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>稼働費入力（パートナー）</title>
-<meta name="description" content="パートナー様の稼働費入力。自宅と稼働場所を登録して、Googleマップで距離を出す。">
+<title>稼働費入力</title>
+<meta name="description" content="稼働費入力（社員・パートナー）。自宅と稼働場所を登録して、Googleマップで距離を出す。">
 <meta name="theme-color" content="#EFF1F4" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0C1015" media="(prefers-color-scheme: dark)">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -229,7 +229,7 @@
     <div>
       <div class="sg-eyebrow">Sieg 業務ポータル</div>
       <h1 class="sg-title">稼働費入力</h1>
-      <div class="sg-sub" id="sub">パートナー様用</div>
+      <div class="sg-sub" id="sub"></div>
     </div>
     <span class="sg-who" id="who" hidden><i id="who-i">?</i><span id="who-n"></span></span>
   </header>
@@ -400,7 +400,7 @@
 
   // ── 名前 ──
   function pickName() {
-    var partners = (R && R.partners) || [];
+    var partners = (R && (R.forTool ? R.forTool('commute') : R.partners)) || [];   // 稼働費を使う人（社員もパートナーも）
     var q = new URLSearchParams(location.search).get('staff') || '';
     var short = '';
     partners.forEach(function (p) { if (q === p || (R.fullName(p) && q === R.fullName(p))) short = p; });
@@ -412,7 +412,7 @@
     var n = pickName();
     if (!n.short) {
       $('state').innerHTML = (n.asked ? esc(n.asked) + 'さんはこの画面を使いません。' : 'ポータルで名前を選んでから開いてください。')
-        + '<br><a href="' + OLD_PAGE + (n.asked ? '?staff=' + encodeURIComponent(n.asked) : '') + '">社員の稼働費入力はこちら</a>';
+        + '<br><a href="' + OLD_PAGE + (n.asked ? '?staff=' + encodeURIComponent(n.asked) + '&old=1' : '') + '">前の稼働費入力はこちら</a>';
       return;
     }
     name = n.short;
@@ -497,7 +497,7 @@
     Array.prototype.forEach.call(document.querySelectorAll('.m-title'), function (el) { el.textContent = ymLabel(ym); });
     Array.prototype.forEach.call(document.querySelectorAll('.m-prev'), function (b) { b.disabled = ym <= minYm; });
     Array.prototype.forEach.call(document.querySelectorAll('.m-next'), function (b) { b.disabled = ym >= maxYm; });
-    $('sub').textContent = ymLabel(ym) + '・パートナー様用';
+    $('sub').textContent = ymLabel(ym);
   }
   function changeMonth(n) {
     var next = addMonth(ym, n);
@@ -545,8 +545,12 @@
   // 開いている月のシフトを読む（月ごとに1回）。シフト表を次の月に切り替えたあとの月は、GAS が「（保存）」のタブから返す。
   // 古い GAS は年月を見ずに「いまのシフト表の月」を返すので、返ってきた年月でしまう（その場合、ほかの月は候補が出ないだけ）
   var shiftAsked = {};
+  var STAFF_SHIFT_API = 'https://script.google.com/macros/s/AKfycbz_aHJ4v0Q-s5_m_i7G7gomrJeicz_iRWPF1qcafrG16gQtTV8VA7dU2ViTNgcbtTgYTg/exec';   // 社員のシフト（ポータルの shift.html と同じ）
+  function isStaff() { return !!(R && R.isPartner && !R.isPartner(name)); }
   function loadShift() {
-    if (!R || !R.shiftPartnerApi || !ym || shiftAsked[ym]) return;
+    if (!R || !ym || shiftAsked[ym]) return;
+    if (isStaff()) { loadStaffShift(); return; }
+    if (!R.shiftPartnerApi) return;
     var want = ym;
     shiftAsked[want] = true;
     GasClient.post(R.shiftPartnerApi, { action: 'getMyShifts', name: name, year: Number(want.slice(0, 4)), month: Number(want.slice(5)) }, { retry: true }).then(function (r) {
@@ -560,6 +564,24 @@
       Object.keys(out).forEach(function (k) { shifts[k] = out[k]; shiftHotel[k] = hot[k] || {}; });
       var nowYm = ymOf(new Date());
       if (want === nowYm) SiegNav.cacheSet(ckey('shift'), { ym: nowYm, days: shifts[nowYm] || {}, hot: shiftHotel[nowYm] || {} });
+      if (me) { renderCal(); renderFromShift(); }
+    }).catch(function () { delete shiftAsked[want]; });
+  }
+  // 社員：社員のシフト表から、取引先のある日だけ（希望休・店休日は入れない）
+  function loadStaffShift() {
+    var want = ym;
+    shiftAsked[want] = true;
+    GasClient.get(STAFF_SHIFT_API, { action: 'list', name: name, year: Number(want.slice(0, 4)), month: Number(want.slice(5)) }).then(function (r) {
+      if (!r || !r.ok) { delete shiftAsked[want]; return; }
+      var o = {}, hot = {};
+      Object.keys(r.days || {}).forEach(function (d) {
+        var e = r.days[d] || {};
+        if (!e.client) return;
+        o[Number(d)] = e.place || e.client || '';
+        if (e.hotel) hot[Number(d)] = String(e.hotel);
+      });
+      shifts = shifts || {}; shifts[want] = o; shiftHotel[want] = hot;
+      if (want === ymOf(new Date())) SiegNav.cacheSet(ckey('shift'), { ym: want, days: o, hot: hot });
       if (me) { renderCal(); renderFromShift(); }
     }).catch(function () { delete shiftAsked[want]; });
   }
