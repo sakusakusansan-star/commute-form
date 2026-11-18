@@ -72,8 +72,8 @@ function Folder(name) {
   f.createFile = b => { const file = { id: 'file' + (++fileSeq), name: b.name || b._name, trashed: false, getId() { return this.id; }, getName() { return this.name; }, setTrashed(v) { this.trashed = v; } }; f.files.push(file); allFiles.push(file); return file; };
   return f;
 }
-const partnerRoot = Folder('パートナー');
-global.DriveApp = { getFolderById: id => { if (id !== '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K') throw new Error('nf'); return partnerRoot; },
+const partnerRoot = Folder('パートナー'), staffRoot = Folder('社員');
+global.DriveApp = { getFolderById: id => { if (id === '1VreXxTQpiTeiAoc_uxsLrpj1KloJ7V2o') return staffRoot; if (id !== '1dsIbQIqUfDrw9p4tKHGweY_hPRIM5h5K') throw new Error('nf'); return partnerRoot; },
   getFileById: id => { const f = allFiles.find(x => x.id === id); if (!f) throw new Error('nf'); return f; } };
 global.ScriptApp = { getOAuthToken: () => 't' };
 let pdfType = 'application/pdf';
@@ -86,8 +86,13 @@ const api = (action, o) => doPost({ postData: { contents: JSON.stringify(Object.
 const ok = (action, o) => { const r = api(action, o); assert.ok(r.ok, action + ': ' + r.error); return r.data; };
 const ng = (action, o, re) => { const r = api(action, o); assert.ok(!r.ok && re.test(r.error), action + ' は ' + re + ' で断る（' + r.error + '）'); };
 
-// 1) 名前：パートナーだけ
-assert.strictEqual(doPost({ postData: { contents: JSON.stringify({ action: 'init', name: '福山' }) } }).ok, false);
+// 1) 名前：名簿が無いときは PARTNERS と STAFF（社員も12月分から使える）。ほかの人は断る
+const fk = doPost({ postData: { contents: JSON.stringify({ action: 'init', name: '福山' }) } });
+assert.ok(fk.ok, fk.error);
+assert.deepStrictEqual([fk.data.group, fk.data.from, fk.data.fullName], ['staff', '2026-12', '福山康平']);
+assert.strictEqual(doPost({ postData: { contents: JSON.stringify({ action: 'init', name: '佐藤' }) } }).ok, false);
+assert.deepStrictEqual(doGet().data.partners, ['山口', '鈴木', '毛利', '山内']);
+assert.deepStrictEqual(doGet().data.users, ['山口', '鈴木', '毛利', '山内', '福山', '古川', '清田']);
 let me = ok('init');
 assert.strictEqual(me.homeSet, false);
 assert.strictEqual(me.fullName, '山口真人');
@@ -293,16 +298,22 @@ rs._g.push(['毛利', 'パートナー', '', '', '○', '', '', '2026-12-01', ''
 rs._g.push(['田中', 'パートナー', '田中一郎', '', '○', '', '', '', '']);
 rs._g.push(['佐藤', 'パートナー', '', '', '', '', '', '', '']);
 rs._g.push(['福山', '社員', '福山康平', '', '○', '○', '', '', '']);
-let t = who('田中', { action: 'init' });
+let ng2, t = who('田中', { action: 'init' });
 assert.ok(t.ok, t.error);
 assert.deepStrictEqual([t.data.fullName, t.data.from], ['田中一郎', '']);
 assert.strictEqual(who('山口', { action: 'init' }).data.from, '2026-12', 'from は PARTNERS のまま');
-['毛利', '佐藤', '福山', '鈴木'].forEach(n => assert.strictEqual(who(n, { action: 'init' }).ok, false, n + ' は使えない'));
+['毛利', '佐藤', '鈴木'].forEach(n => assert.strictEqual(who(n, { action: 'init' }).ok, false, n + ' は使えない'));
+// 名簿の社員で「稼働費」に印のある人も使える（STAFF の人は12月分から）
+t = who('福山', { action: 'init' });
+assert.ok(t.ok, t.error);
+assert.deepStrictEqual([t.data.group, t.data.from, t.data.fullName], ['staff', '2026-12', '福山康平']);
+ng2 = who('福山', { action: 'saveDays', dates: ['2026-11-30'], stops: ['home', 'x', 'home'] });
+assert.ok(!ng2.ok && /12月分から/.test(ng2.error), ng2.error);
 // checkRoster はログに出すだけ
 const logs = []; const oldLogger = global.Logger; global.Logger = { log: m => logs.push(String(m)) };
 checkRoster();
 global.Logger = oldLogger;
-assert.ok(logs[0].startsWith('名簿 5人：') && logs[0].includes('毛利（外した）') && logs[0].endsWith('この画面を使える人：山口・田中'), logs[0]);
+assert.ok(logs[0].startsWith('名簿 5人：') && logs[0].includes('毛利（外した）') && logs[0].endsWith('この画面を使える人：山口・田中・福山'), logs[0]);
 // 前の画面（山口_稼働費計算_GAS版）から自宅と場所を写す。2回目は増えない
 {
   const oldSh = Sheet('稼働場所');
@@ -322,5 +333,31 @@ assert.ok(logs[0].startsWith('名簿 5人：') && logs[0].includes('毛利（外
   assert.strictEqual(sheets['場所']._g.filter(r => r[1] === '田中').length, 2);
   assert.ok(importOldPlaces_('田中', 'NONE').includes('見つかりません'));
   SpreadsheetApp.openById = realOpen;
+}
+// 社員：PDFは「社員」フォルダに。前のブック（全員の場所が1枚）からは、その人が使った場所と自宅だけ写す
+{
+  const fk = (o) => doPost({ postData: { contents: JSON.stringify(Object.assign({ name: '福山' }, o)) } });
+  const book = {}, sh = (n, rows) => { const x = Sheet(n); rows.forEach(r => x.appendRow(r)); book[n] = x; };
+  sh('稼働場所', [['短縮名', '住所'], ['福山自宅', '福岡県飯塚市枝国1-2-3'], ['古川自宅', '熊本県熊本市南区'], ['au春日', '福岡県春日市星見ヶ丘3丁目'], ['イオン大牟田', '福岡県大牟田市岬町3-4'], ['ドコモ近見', '熊本県熊本市南区近見']]);
+  sh('福山康平', [['経費精算書'], ['氏名'], [''], [''], ['日付', '曜', '稼　働　場　所'], ['11/1', '日', 'au春日'], ['11/2', '月', '']]);
+  sh('稼働費履歴', [['年月', 'スタッフ', '種類', '日', '場所・内容'], ['2026-10', '福山康平', '通常', 2, 'イオン大牟田'], ['2026-10', '古川泰成', '通常', 3, 'ドコモ近見'], ['2026-10', '福山康平', 'イレギュラー', 4, '出張']]);
+  const realOpen = SpreadsheetApp.openById;
+  SpreadsheetApp.openById = id => id === OLD_MAIN_BOOK ? { getSheetByName: n => book[n] || null } : realOpen(id);
+  const r1 = importOldPlaces_('福山', OLD_BOOKS['福山']);
+  assert.strictEqual(r1, '福山：自宅 1件・場所 2件を写しました', r1);
+  const me = fk({ action: 'init' }).data;
+  assert.deepStrictEqual(me.places.map(p => p.name), ['au春日', 'イオン大牟田'], 'ほかの人の場所（ドコモ近見）や自宅は写さない');
+  assert.deepStrictEqual(me.homes.map(h => h.label + '|' + h.main), ['自宅|true']);
+  assert.ok(importOldPlaces_('清田', { id: OLD_MAIN_BOOK, sheet: '清田和男' }).includes('見つかりません'), 'シートも履歴も無い人は止める');
+  SpreadsheetApp.openById = realOpen;
+  // 12月分を入れて PDF → 社員/福山/2026年/12月
+  const au = me.places[1].id;
+  let r = fk({ action: 'saveDays', dates: ['2026-12-01'], stops: ['home', au, 'home'], highway: false });
+  assert.ok(r.ok, r.error);
+  r = fk({ action: 'exportPdf', ym: '2026-12' });
+  assert.ok(r.ok, r.error);
+  const f = staffRoot.folders[0];
+  assert.strictEqual(f.name + '/' + f.folders[0].name + '/' + f.folders[0].folders[0].name, '福山/2026年/12月');
+  assert.strictEqual(f.folders[0].folders[0].files[0].name, '2026-12_福山_稼働費.pdf');
 }
 console.log('partner-commute: all tests passed');
