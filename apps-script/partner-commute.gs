@@ -28,7 +28,7 @@
 // ============================================================
 
 var SHEET_ID = '19TTixFCWjVUR9S4XvsMjdbQt_U3v4MlCdvVpgTMsK_U';   // パートナー_交通費（12月〜）
-var CODE_VERSION = '2026-11-19';
+var CODE_VERSION = '2026-11-22';
 var RATE_PER_KM = 15;
 
 // 名前 → { full: PDFに載せる氏名（本人が画面で登録すればそちらを使う）, from: この画面で入力できる最初の月 }
@@ -251,6 +251,30 @@ function legKm_(from, to, highway, memo) {
 
 // stops：'home' か場所のID の並び → 名前と住所
 // 'home' はいつもの自宅、'home:ID' はその自宅
+// ── 場所の一覧（日報のスプレッドシートの「場所」シート。みんなの状況で直す）──────────
+// シフトの開催場所 → 住所。本人がまだ登録していない場所でも、一覧の住所で距離を出せる（'master:名前'）。2分覚えておく
+function masterPlaces_() {
+  var cache = null;
+  try { cache = CacheService.getScriptCache(); } catch (e) {}
+  var hit = cache && cache.get('places:v1');
+  if (hit) { try { return JSON.parse(hit); } catch (e) {} }
+  var list = [];
+  try {
+    var sh = SpreadsheetApp.openById(ROSTER_BOOK_ID).getSheetByName('場所');
+    if (sh && sh.getLastRow() >= 2) {
+      list = sh.getRange(2, 1, sh.getLastRow() - 1, 7).getValues().filter(function (r) { return String(r[0]).trim() && String(r[2]).trim() && !String(r[6] || '').trim(); })
+        .map(function (r) { return { name: String(r[0]).trim(), address: String(r[2]).trim() }; });
+    }
+  } catch (e) { list = []; }
+  try { if (cache) cache.put('places:v1', JSON.stringify(list), 120); } catch (e) {}
+  return list;
+}
+function masterPlace_(name) {
+  var l = masterPlaces_();
+  for (var i = 0; i < l.length; i++) if (l[i].name === name) return l[i];
+  return null;
+}
+
 function resolveStops_(name, stops) {
   if (!stops || !stops.length || stops.length < 2) throw new Error('経路は2か所以上にしてください。');
   if (stops.length > MAX_STOPS) throw new Error('経路に入れられるのは ' + MAX_STOPS + ' か所までです。');
@@ -265,6 +289,11 @@ function resolveStops_(name, stops) {
       return { id: 'home:' + h.id, name: h.label, address: h.address };
     }
     for (var i = 0; i < places.length; i++) if (places[i].id === s) return places[i];
+    if (s.indexOf('master:') === 0) {   // 場所の一覧から（本人がまだ登録していない場所）
+      var mp = masterPlace_(s.slice(7));
+      if (mp) return { id: s, name: mp.name, address: mp.address, master: true };
+      throw new Error('場所の一覧に無い場所が入っています（' + s.slice(7) + '）。場所を選び直してください。');
+    }
     throw new Error('登録されていない場所が入っています。場所を選び直してください。');
   });
   for (var i = 1; i < out.length; i++) {
@@ -527,6 +556,11 @@ function saveDays_(name, req) {
   if (note.length > 200) throw new Error('備考が長すぎます（200文字まで）。');
 
   var r = route_(name, req.stops, highway);
+  // 一覧から使った場所は、本人の「場所」にも足しておく（次からは自分の場所として選べる）
+  var mine = placesOf_(name).map(function (p) { return p.name; });
+  r.stops.forEach(function (st) {
+    if (st.master && mine.indexOf(st.name) < 0) { sheet_(SH.places).appendRow([newId_(), name, st.name, st.address, now_(), '']); mine.push(st.name); }
+  });
   var stopsJson = JSON.stringify(r.stops.map(function (s) { return { n: s.name, a: s.address }; }));
   var legsJson = JSON.stringify(r.legs.map(function (l) { return l.km; }));
   var sh = sheet_(SH.records);
