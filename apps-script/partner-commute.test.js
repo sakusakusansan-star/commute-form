@@ -360,4 +360,26 @@ assert.ok(logs[0].startsWith('名簿 5人：') && logs[0].includes('毛利（外
   assert.strictEqual(f.name + '/' + f.folders[0].name + '/' + f.folders[0].folders[0].name, '福山/2026年/12月');
   assert.strictEqual(f.folders[0].folders[0].files[0].name, '2026-12_福山_稼働費.pdf');
 }
+// 場所の一覧（日報のブックの「場所」シート）：本人が登録していない場所でも 'master:名前' で入れられる。使ったら本人の場所にも足す
+{
+  const master = Sheet('場所(一覧)');
+  [['名前', '別名', '住所', '店舗稼働', '担当店舗', 'カッコなし', '外した日'], ['ゆめタウン大牟田', '', '福岡県大牟田市岬町3-4', '', '', '○', ''], ['外した場所', '', '福岡県大牟田市岬町3-4', '', '', '', '2026-11-01']].forEach(r => master.appendRow(r));
+  const realOpen = SpreadsheetApp.openById;
+  SpreadsheetApp.openById = id => id === ROSTER_BOOK_ID ? { getSheetByName: n => n === '場所' ? master : ss.getSheetByName(n) } : ss;
+  const yg = (o) => doPost({ postData: { contents: JSON.stringify(Object.assign({ name: '山口' }, o)) } });
+  const before = yg({ action: 'init' }).data.places.map(p => p.name);
+  assert.ok(!before.includes('ゆめタウン大牟田'));
+  let r = yg({ action: 'saveDays', dates: ['2026-12-20'], stops: ['home', 'master:ゆめタウン大牟田', 'home'], highway: false });
+  assert.ok(r.ok, r.error);
+  assert.strictEqual(r.data.route.text, '自宅 → ゆめタウン大牟田 → 自宅');
+  const after = yg({ action: 'init' }).data.places.map(p => p.name);
+  assert.ok(after.includes('ゆめタウン大牟田'), '使った場所は本人の場所に足す');
+  // 2回目は足さない
+  yg({ action: 'saveDays', dates: ['2026-12-21'], stops: ['home', 'master:ゆめタウン大牟田', 'home'], highway: false });
+  assert.strictEqual(yg({ action: 'init' }).data.places.filter(p => p.name === 'ゆめタウン大牟田').length, 1);
+  // 一覧に無い・外した場所は断る
+  r = yg({ action: 'saveDays', dates: ['2026-12-22'], stops: ['home', 'master:外した場所', 'home'], highway: false });
+  assert.ok(!r.ok && /一覧に無い/.test(r.error), r.error);
+  SpreadsheetApp.openById = realOpen;
+}
 console.log('partner-commute: all tests passed');
